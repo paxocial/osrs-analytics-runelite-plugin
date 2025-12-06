@@ -27,3 +27,7 @@ Opt-in plugin that streams snapshots to `osrs.cortalabs.com/api` so Corta Labs c
 
 ## Support
 Issues and questions: https://cortalabs.com (or your current repo/Discord once set).
+
+## Acknowledgements
+- Inspired by and derived from the original Wise Old Man RuneLite plugin (BSD 2-Clause): https://github.com/wise-old-man/wiseoldman-runelite-plugin
+- Thanks to the Wise Old Man project and community: https://wiseoldman.net
