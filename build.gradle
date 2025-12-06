@@ -15,15 +15,15 @@ def runeLiteVersion = 'latest.release'
 dependencies {
 	compileOnly group: 'net.runelite', name:'client', version: runeLiteVersion
 
-	compileOnly 'org.projectlombok:lombok:1.18.4'
-	annotationProcessor 'org.projectlombok:lombok:1.18.4'
+	compileOnly 'org.projectlombok:lombok:1.18.30'
+	annotationProcessor 'org.projectlombok:lombok:1.18.30'
 
 	testImplementation 'junit:junit:4.12'
 	testImplementation group: 'net.runelite', name:'client', version: runeLiteVersion
 }
 
-group = 'net.wiseoldman'
-version = '1.4.17'
+group = 'com.cortalabs.osrs.analytics'
+version = '0.1.0'
 sourceCompatibility = '1.8'
 
 tasks.withType(JavaCompile) {

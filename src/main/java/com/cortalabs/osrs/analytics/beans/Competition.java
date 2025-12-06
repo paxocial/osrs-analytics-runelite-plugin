@@ -1,0 +1,99 @@
+package com.cortalabs.osrs.analytics.beans;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Date;
+import lombok.Data;
+import org.apache.commons.lang3.time.DurationFormatUtils;
+
+@Data
+public class Competition
+{
+	int id;
+	String title;
+	Metric metric;
+	CompetitionType type;
+	Date startsAt;
+	Date endsAt;
+	int groupId;
+	int score;
+	Date createdAt;
+	Date updatedAt;
+	GroupInfo group;
+	int participantCount;
+
+	public boolean isActive()
+	{
+		return hasStarted() && !hasEnded();
+	}
+
+	public boolean hasEnded()
+	{
+		return endsAt.before(new Date());
+	}
+
+	public boolean hasStarted()
+	{
+		return startsAt.before(new Date());
+	}
+
+	public Duration durationLeft()
+	{
+		if (isActive())
+		{
+			return Duration.between(Instant.now(), endsAt.toInstant());
+		}
+		else if (!hasStarted())
+		{
+			return Duration.between(Instant.now(), startsAt.toInstant());
+		}
+		else
+		{
+			return Duration.ZERO;
+		}
+	}
+
+	private String durationLeftPretty()
+	{
+		return DurationFormatUtils.formatDurationWords(durationLeft().toMillis(), true, true)
+			.replaceAll(" days?", "d")
+			.replaceAll(" hours?", "h")
+			.replaceAll(" minutes?", "m")
+			.replaceAll(" seconds?", "s");
+	}
+
+	public String getStatus()
+	{
+		StringBuilder sb = new StringBuilder();
+		sb.append("Competition: ").append(title).append(" ");
+		if (isActive())
+		{
+			sb.append("ends in ").append(durationLeftPretty());
+		}
+		else if (!hasStarted())
+		{
+			sb.append("starts in ").append(durationLeftPretty());
+		}
+
+		return sb.toString();
+	}
+
+	public String getTimeStatus()
+	{
+		StringBuilder sb = new StringBuilder();
+
+		if (isActive())
+		{
+			sb.append("Ends in ").append(durationLeftPretty());
+		}
+		else if (!hasStarted())
+		{
+			sb.append("Starts in ").append(durationLeftPretty());
+		}
+		else
+		{
+			sb.append("Ended");
+		}
+		return sb.toString();
+	}
+}
