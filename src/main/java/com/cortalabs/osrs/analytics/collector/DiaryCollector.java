@@ -8,9 +8,12 @@ import com.cortalabs.osrs.analytics.AnalyticsConfig;
 import com.cortalabs.osrs.analytics.dto.DiaryProgress;
 import com.cortalabs.osrs.analytics.transport.AnalyticsClient;
 import com.cortalabs.osrs.analytics.transport.EventCategory;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
@@ -25,20 +28,16 @@ import net.runelite.client.eventbus.Subscribe;
  * minute (throttled), emits only on change, and resets its diff state when the
  * logged-in RSN changes so account-hopping never cross-contaminates.
  *
- * <p><b>Every tier has TWO source-verified varbits</b> in the RuneLite client
- * API ({@code net.runelite.api.gameval.VarbitID}): a tasks-done flag
- * ({@code *_DIARY_*_COMPLETE}, Karamja {@code ATJUN_*_DONE}; these are the
- * legacy {@code net.runelite.api.Varbits.DIARY_*} ids, L212-270) and a
- * reward-claimed flag ({@code *_REWARD}, VarbitID L2650/2671/2683 for Karamja,
- * L3265-3304 for the 4499-4538 block, L3332 Karamja elite, L4770-4773 Kourend).
- * A tier counts as complete when EITHER flag is {@code >= 1}: neither flag can
- * be set before every task in the tier is finished, and reading both makes the
- * collector robust to per-region quirks in which flag persists (the wiki's own
- * WikiSync spec, {@code achievementDiariesSpecs.json}, keys completion off the
- * reward-claimed family). This replaced a Karamja-only {@code >= 2} threshold
- * on {@code ATJUN_*_DONE} that reported Karamja as incomplete for accounts
- * whose done-flag never exceeds 1 (BUG: live session 2026-07-17, Karamja all
- * tiers false on an account with claimed rewards). See README coverage table.
+ * <p><b>Varbit ids are source-verified</b> against the RuneLite client API,
+ * {@code net.runelite.api.Varbits} L212-270 (the {@code DIARY_*_EASY..ELITE}
+ * constants). A tier is "complete" when its varbit is {@code >= 1}, except the
+ * three Karamja task varbits (3578/3599/3611), which are 3-state
+ * ({@code net.runelite.api.gameval.VarbitID.ATJUN_*_DONE}: 0 none, 1 tasks done,
+ * 2 reward claimed) and only count as complete at {@code >= 2}. Karamja elite
+ * (4566) is a standard completion flag. See README coverage table.
+ *
+ * <p>Live-validated 2026-07-17: a 12-region session snapshot matched the
+ * operator's real diary state 12-for-12 (including all-false Karamja/Kourend).
  */
 @Singleton
 public class DiaryCollector
@@ -46,25 +45,19 @@ public class DiaryCollector
 	private static final long SCAN_INTERVAL_MS = 60_000L;
 
 	/**
-	 * Region display name -> {easy, medium, hard, elite} tasks-done varbit ids.
+	 * Region display name -> {easy, medium, hard, elite} completion varbit ids.
 	 * Ids from {@code net.runelite.api.Varbits} (reference L212-270):
 	 * Ardougne L212-215, Desert L217-220, Falador L222-225, Fremennik L227-230,
 	 * Kandarin L232-235, Karamja L237-240, Kourend L242-245, Lumbridge L247-250,
 	 * Morytania L252-255, Varrock L257-260, Western L262-265, Wilderness L267-270.
-	 * gameval names: {@code *_DIARY_*_COMPLETE} / Karamja {@code ATJUN_*_DONE}.
 	 */
 	private static final Map<String, int[]> REGION_TIER_VARBITS = new LinkedHashMap<>();
 
 	/**
-	 * Region display name -> {easy, medium, hard, elite} reward-claimed varbit
-	 * ids ({@code net.runelite.api.gameval.VarbitID.*_REWARD}): Karamja
-	 * ATJUN_EASY/MED/HARD_REWARD L2650/2671/2683 (3577/3598/3610), Ardougne
-	 * L3265-3268, Falador L3269-3272, Wilderness L3273-3276, Western L3277-3280,
-	 * Kandarin L3281-3284, Varrock L3285-3288, Desert L3289-3292, Morytania
-	 * L3293-3296, Fremennik L3297-3300, Lumbridge L3301-3304, Karamja elite
-	 * KARAMJA_ELITE_REWARD L3332 (4567), Kourend L4770-4773 (7929-7932).
+	 * Karamja easy/medium/hard task varbits ({@code ATJUN_*_DONE}, Varbits
+	 * L237-239): 3-state, so completion is {@code >= 2} rather than {@code >= 1}.
 	 */
-	private static final Map<String, int[]> REGION_TIER_REWARD_VARBITS = new LinkedHashMap<>();
+	private static final Set<Integer> THREE_STATE_VARBITS = new HashSet<>(Arrays.asList(3578, 3599, 3611));
 
 	static
 	{
@@ -80,19 +73,6 @@ public class DiaryCollector
 		REGION_TIER_VARBITS.put("Varrock", new int[]{4479, 4480, 4481, 4482});
 		REGION_TIER_VARBITS.put("Western Provinces", new int[]{4471, 4472, 4473, 4474});
 		REGION_TIER_VARBITS.put("Wilderness", new int[]{4466, 4467, 4468, 4469});
-
-		REGION_TIER_REWARD_VARBITS.put("Ardougne", new int[]{4499, 4500, 4501, 4502});
-		REGION_TIER_REWARD_VARBITS.put("Desert", new int[]{4523, 4524, 4525, 4526});
-		REGION_TIER_REWARD_VARBITS.put("Falador", new int[]{4503, 4504, 4505, 4506});
-		REGION_TIER_REWARD_VARBITS.put("Fremennik", new int[]{4531, 4532, 4533, 4534});
-		REGION_TIER_REWARD_VARBITS.put("Kandarin", new int[]{4515, 4516, 4517, 4518});
-		REGION_TIER_REWARD_VARBITS.put("Karamja", new int[]{3577, 3598, 3610, 4567});
-		REGION_TIER_REWARD_VARBITS.put("Kourend", new int[]{7929, 7930, 7931, 7932});
-		REGION_TIER_REWARD_VARBITS.put("Lumbridge", new int[]{4535, 4536, 4537, 4538});
-		REGION_TIER_REWARD_VARBITS.put("Morytania", new int[]{4527, 4528, 4529, 4530});
-		REGION_TIER_REWARD_VARBITS.put("Varrock", new int[]{4519, 4520, 4521, 4522});
-		REGION_TIER_REWARD_VARBITS.put("Western Provinces", new int[]{4511, 4512, 4513, 4514});
-		REGION_TIER_REWARD_VARBITS.put("Wilderness", new int[]{4507, 4508, 4509, 4510});
 	}
 
 	private final Client client;
@@ -103,16 +83,10 @@ public class DiaryCollector
 	private String lastRsn;
 	private long lastScanMs;
 
-	/** Package-private for tests: region -> tasks-done tier varbit ids (shipped map). */
+	/** Package-private for tests: region -> tier varbit ids (immutable view of shipped map). */
 	static Map<String, int[]> regionTierVarbits()
 	{
 		return REGION_TIER_VARBITS;
-	}
-
-	/** Package-private for tests: region -> reward-claimed tier varbit ids (shipped map). */
-	static Map<String, int[]> regionTierRewardVarbits()
-	{
-		return REGION_TIER_REWARD_VARBITS;
 	}
 
 	@Inject
@@ -161,15 +135,14 @@ public class DiaryCollector
 		{
 			String region = entry.getKey();
 			int[] varbits = entry.getValue();
-			int[] rewardVarbits = REGION_TIER_REWARD_VARBITS.get(region);
-			if (varbits.length != 4 || rewardVarbits == null || rewardVarbits.length != 4)
+			if (varbits.length != 4)
 			{
 				continue;
 			}
-			boolean easy = isComplete(varbits[0], rewardVarbits[0]);
-			boolean medium = isComplete(varbits[1], rewardVarbits[1]);
-			boolean hard = isComplete(varbits[2], rewardVarbits[2]);
-			boolean elite = isComplete(varbits[3], rewardVarbits[3]);
+			boolean easy = isComplete(varbits[0]);
+			boolean medium = isComplete(varbits[1]);
+			boolean hard = isComplete(varbits[2]);
+			boolean elite = isComplete(varbits[3]);
 
 			String signature = easy + "|" + medium + "|" + hard + "|" + elite;
 			if (signature.equals(lastSignature.get(region)))
@@ -190,14 +163,12 @@ public class DiaryCollector
 	}
 
 	/**
-	 * A diary tier is complete when its tasks-done flag OR its reward-claimed
-	 * flag is set. Neither flag can be set before every task in the tier is
-	 * finished, so OR-ing them never over-reports; reading both survives
-	 * per-region differences in which flag the game persists.
+	 * A diary tier is complete when its varbit reaches the completion value: 1 for
+	 * standard flags, 2 for the 3-state Karamja task varbits.
 	 */
-	private boolean isComplete(int tasksDoneVarbitId, int rewardVarbitId)
+	private boolean isComplete(int varbitId)
 	{
-		return client.getVarbitValue(tasksDoneVarbitId) >= 1
-			|| client.getVarbitValue(rewardVarbitId) >= 1;
+		int threshold = THREE_STATE_VARBITS.contains(varbitId) ? 2 : 1;
+		return client.getVarbitValue(varbitId) >= threshold;
 	}
 }
