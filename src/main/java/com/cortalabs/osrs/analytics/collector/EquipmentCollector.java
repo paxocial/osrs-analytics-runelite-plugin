@@ -30,15 +30,26 @@ import net.runelite.client.eventbus.Subscribe;
  * Snapshots worn equipment and inventory. Container changes are debounced so a
  * burst of updates (e.g. re-equipping a set) yields at most one send per
  * {@link #DEBOUNCE_MS}.
+ *
+ * <p>A debounced snapshot identical to the last one sent for the same account is
+ * suppressed via {@link AccountKeyedDeltaGuard} — a change burst that nets back to
+ * the previous state (withdraw-then-redeposit, a transient the container settles
+ * out of) carries no new information, and an equipment row is not read anywhere on
+ * the server (it is absent from {@code resolve_progression_as_of}), so suppressing
+ * it costs no freshness. This is the change-guard every sibling collector already
+ * has; equipment was the one without it.
  */
 @Singleton
 public class EquipmentCollector
 {
 	private static final long DEBOUNCE_MS = 3_000L;
+	/** Single tracked entity for this whole-snapshot collector. */
+	private static final String SNAPSHOT_KEY = "equipment";
 
 	private final Client client;
 	private final AnalyticsClient analytics;
 	private final AnalyticsConfig config;
+	private final AccountKeyedDeltaGuard delta = new AccountKeyedDeltaGuard();
 
 	private boolean dirty;
 	private long lastSendMs;
@@ -89,11 +100,45 @@ public class EquipmentCollector
 
 	private void snapshot(String rsn)
 	{
+		Map<String, Integer> equipment = readEquipment();
+		List<ItemEntry> inventory = readInventory();
+
+		long accountHash = client.getAccountHash();
+		// When the account hash is unknown, never suppress: emitting an occasional
+		// duplicate is cheap, but suppressing under an ambiguous identity risks
+		// dropping a real snapshot for a different account. Mirrors NameChangeCollector.
+		if (accountHash != AccountKeyedDeltaGuard.NO_ACCOUNT
+			&& !delta.changed(accountHash, SNAPSHOT_KEY, signature(equipment, inventory)))
+		{
+			return; // identical to the last snapshot already sent for this account
+		}
+
 		EquipmentState payload = new EquipmentState();
 		Payloads.base(payload, client, rsn);
-		payload.equipment = readEquipment();
-		payload.inventory = readInventory();
+		payload.equipment = equipment;
+		payload.inventory = inventory;
 		analytics.enqueue(EventCategory.EQUIPMENT, payload);
+	}
+
+	/**
+	 * Deterministic state fingerprint of a snapshot. Equipment iterates in fixed
+	 * {@link EquipmentInventorySlot} order and inventory in container-slot order, so
+	 * an unchanged loadout always yields the identical string. Package-private and
+	 * client-free for direct testing.
+	 */
+	static String signature(Map<String, Integer> equipment, List<ItemEntry> inventory)
+	{
+		StringBuilder sb = new StringBuilder("e:");
+		for (Map.Entry<String, Integer> entry : equipment.entrySet())
+		{
+			sb.append(entry.getKey()).append('=').append(entry.getValue()).append(';');
+		}
+		sb.append("|i:");
+		for (ItemEntry item : inventory)
+		{
+			sb.append(item.itemId).append('x').append(item.quantity).append(',');
+		}
+		return sb.toString();
 	}
 
 	private Map<String, Integer> readEquipment()
