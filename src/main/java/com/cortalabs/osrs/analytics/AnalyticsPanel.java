@@ -460,7 +460,7 @@ class AnalyticsPanel extends PluginPanel
 			case QUEST:
 				return "Quests";
 			case DIARY:
-				return "Diaries";
+				return "Diaries (regions)";
 			case COMBAT_ACHIEVEMENT:
 				return "Combat achv";
 			case EQUIPMENT:

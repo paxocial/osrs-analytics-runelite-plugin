@@ -20,7 +20,11 @@ public class ItemEntry
 
 	public int quantity;
 
-	/** Grand Exchange value for this stack (bank items only); omitted when null. */
+	/**
+	 * Value for this stack (bank items only); omitted when null. GE price when
+	 * the item has one, high-alchemy fallback otherwise — see the
+	 * {@code valuation_method} field on {@code BankSnapshot}.
+	 */
 	public Long value;
 
 	public ItemEntry(int itemId, int quantity)

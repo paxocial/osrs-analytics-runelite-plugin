@@ -22,8 +22,20 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
 
 /**
- * Snapshots bank contents (item ids, quantities, GE values, and total value)
+ * Snapshots bank contents (item ids, quantities, values, and total value)
  * when the bank container changes. Opt-in (privacy); debounced.
+ *
+ * <p><b>Valuation ({@code ge_then_ha_v1})</b> mirrors RuneLite's own bank
+ * plugin: {@code ItemManager.getItemPrice} (ItemManager.java L282-334: coins
+ * 1:1, platinum 1000:1, notes canonicalized, untradeable-variant mapping, GE /
+ * wiki price per client config) with a high-alchemy fallback via
+ * {@code ItemComposition.getHaPrice()} for items with no GE price — the same
+ * HA source RuneLite's bank value uses ({@code BankPlugin.getHaPrice},
+ * BankPlugin.java L618-629). Without the fallback every untradeable is worth 0
+ * and the total under-reports the account (BUG: live session 2026-07-17).
+ * Placeholders never contribute: they are quantity-0 entries, excluded by the
+ * quantity filter exactly as {@code BankPlugin.calculate} (L591-616) excludes
+ * them.
  */
 @Singleton
 public class BankCollector
@@ -85,7 +97,7 @@ public class BankCollector
 			{
 				continue;
 			}
-			long stackValue = (long) itemManager.getItemPrice(item.getId()) * item.getQuantity();
+			long stackValue = unitValue(item.getId()) * item.getQuantity();
 			items.add(new ItemEntry(item.getId(), item.getQuantity(), stackValue));
 			totalValue += stackValue;
 		}
@@ -94,6 +106,22 @@ public class BankCollector
 		Payloads.base(payload, client, rsn);
 		payload.items = items;
 		payload.totalValue = totalValue;
+		payload.valuationMethod = "ge_then_ha_v1";
 		analytics.enqueue(EventCategory.BANK, payload);
+	}
+
+	/**
+	 * Per-unit value: GE price when the item has one (coins/platinum are 1/1000
+	 * inside {@code getItemPrice}), otherwise the high-alchemy price so
+	 * untradeables are not reported as worthless. Never negative.
+	 */
+	private long unitValue(int itemId)
+	{
+		int gePrice = itemManager.getItemPrice(itemId);
+		if (gePrice > 0)
+		{
+			return gePrice;
+		}
+		return Math.max(0, itemManager.getItemComposition(itemId).getHaPrice());
 	}
 }

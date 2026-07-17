@@ -19,8 +19,13 @@ import static org.junit.Assert.assertTrue;
  * achievement collectors. These maps are the whole reason those collectors emit
  * anything, so a regression here silently blinds the telemetry — hence a test.
  *
- * <p>Ids are cross-checked against RuneLite's {@code net.runelite.api.Varbits}
- * (diary L212-270; combat-task counts L970-975).
+ * <p>Diary ids are cross-checked against two families in RuneLite's API:
+ * tasks-done flags ({@code net.runelite.api.Varbits} L212-270, gameval
+ * {@code *_DIARY_*_COMPLETE} / {@code ATJUN_*_DONE}) and reward-claimed flags
+ * ({@code net.runelite.api.gameval.VarbitID.*_REWARD}: Karamja L2650/2671/2683,
+ * 4499-4538 block L3265-3304, Karamja elite L3332, Kourend L4770-4773).
+ * Combat-task counts: {@code CA_TOTAL_TASKS_COMPLETED_*} (VarbitID L8058-8063,
+ * legacy Varbits {@code COMBAT_TASK_*} L970-975).
  */
 public class CollectorVarbitMapTest
 {
@@ -32,29 +37,33 @@ public class CollectorVarbitMapTest
 		"easy", "medium", "hard", "elite", "master", "grandmaster");
 
 	@Test
-	public void diaryMapCoversEveryRegionAndTier()
+	public void diaryMapsCoverEveryRegionAndTier()
 	{
-		Map<String, int[]> map = DiaryCollector.regionTierVarbits();
-		assertEquals("all twelve diary regions present", EXPECTED_REGIONS.size(), map.size());
-		assertTrue("region set matches the OSRS diary regions",
-			map.keySet().containsAll(EXPECTED_REGIONS));
-		for (Map.Entry<String, int[]> entry : map.entrySet())
+		for (Map<String, int[]> map : Arrays.asList(
+			DiaryCollector.regionTierVarbits(), DiaryCollector.regionTierRewardVarbits()))
 		{
-			assertEquals(entry.getKey() + " must have easy/medium/hard/elite varbits",
-				4, entry.getValue().length);
-			for (int varbit : entry.getValue())
+			assertEquals("all twelve diary regions present", EXPECTED_REGIONS.size(), map.size());
+			assertTrue("region set matches the OSRS diary regions",
+				map.keySet().containsAll(EXPECTED_REGIONS));
+			for (Map.Entry<String, int[]> entry : map.entrySet())
 			{
-				assertTrue(entry.getKey() + " varbit ids must be positive", varbit > 0);
+				assertEquals(entry.getKey() + " must have easy/medium/hard/elite varbits",
+					4, entry.getValue().length);
+				for (int varbit : entry.getValue())
+				{
+					assertTrue(entry.getKey() + " varbit ids must be positive", varbit > 0);
+				}
 			}
 		}
 	}
 
 	@Test
-	public void diaryMapMatchesSourceVerifiedIds()
+	public void diaryTasksDoneMapMatchesSourceVerifiedIds()
 	{
 		Map<String, int[]> map = DiaryCollector.regionTierVarbits();
-		// Spot-check against Varbits.java: standard region, the Karamja special case,
-		// and the highest-id region.
+		// Spot-check against Varbits.java L212-270 (gameval *_DIARY_*_COMPLETE /
+		// ATJUN_*_DONE): standard region, the Karamja legacy ids, the highest-id
+		// region, and Wilderness.
 		assertArrayEquals(new int[]{4458, 4459, 4460, 4461}, map.get("Ardougne"));
 		assertArrayEquals(new int[]{3578, 3599, 3611, 4566}, map.get("Karamja"));
 		assertArrayEquals(new int[]{7925, 7926, 7927, 7928}, map.get("Kourend"));
@@ -62,17 +71,39 @@ public class CollectorVarbitMapTest
 	}
 
 	@Test
-	public void diaryVarbitIdsAreUnique()
+	public void diaryRewardMapMatchesSourceVerifiedIds()
+	{
+		Map<String, int[]> map = DiaryCollector.regionTierRewardVarbits();
+		// gameval VarbitID.java: ARDOUGNE_*_REWARD L3265-3268; ATJUN_EASY/MED/
+		// HARD_REWARD L2650/2671/2683 + KARAMJA_ELITE_REWARD L3332;
+		// KOUREND_*_REWARD L4770-4773; WILDERNESS_*_REWARD L3273-3276. These are
+		// the ids WikiSync's achievementDiariesSpecs.json keys completion off.
+		assertArrayEquals(new int[]{4499, 4500, 4501, 4502}, map.get("Ardougne"));
+		assertArrayEquals(new int[]{3577, 3598, 3610, 4567}, map.get("Karamja"));
+		assertArrayEquals(new int[]{7929, 7930, 7931, 7932}, map.get("Kourend"));
+		assertArrayEquals(new int[]{4507, 4508, 4509, 4510}, map.get("Wilderness"));
+		// Regression guard for the Karamja bug (live session 2026-07-17): the
+		// reward family must differ from the tasks-done family so the OR check
+		// actually reads a second signal.
+		assertArrayEquals(new int[]{4511, 4512, 4513, 4514}, map.get("Western Provinces"));
+	}
+
+	@Test
+	public void diaryVarbitIdsAreUniqueAcrossBothFamilies()
 	{
 		Set<Integer> seen = new HashSet<>();
-		for (int[] tiers : DiaryCollector.regionTierVarbits().values())
+		for (Map<String, int[]> map : Arrays.asList(
+			DiaryCollector.regionTierVarbits(), DiaryCollector.regionTierRewardVarbits()))
 		{
-			for (int varbit : tiers)
+			for (int[] tiers : map.values())
 			{
-				assertTrue("duplicate diary varbit id " + varbit, seen.add(varbit));
+				for (int varbit : tiers)
+				{
+					assertTrue("duplicate diary varbit id " + varbit, seen.add(varbit));
+				}
 			}
 		}
-		assertEquals("12 regions x 4 tiers = 48 distinct varbits", 48, seen.size());
+		assertEquals("12 regions x 4 tiers x 2 families = 96 distinct varbits", 96, seen.size());
 	}
 
 	@Test

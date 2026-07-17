@@ -127,6 +127,11 @@ public class CombatAchievementCollector
 		CombatAchievementProgress payload = new CombatAchievementProgress();
 		Payloads.base(payload, client, rsn);
 		payload.tierProgress = tierProgress;
+		// Always empty: RuneLite's API exposes no combat-achievement task
+		// enumeration (per-task completion lives in cache enums/varp bitmasks the
+		// client API does not surface), so task names cannot be honestly
+		// populated. Kept on the wire only because the backend contract requires
+		// the field; flagged for schema removal.
 		payload.completedTasks = new ArrayList<>();
 		analytics.enqueue(EventCategory.COMBAT_ACHIEVEMENT, payload);
 	}

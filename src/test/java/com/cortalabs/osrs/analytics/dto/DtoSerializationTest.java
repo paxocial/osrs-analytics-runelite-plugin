@@ -134,10 +134,30 @@ public class DtoSerializationTest
 		quest.pluginVersion = "1.0.0";
 		quest.questName = "Cook's Assistant";
 		quest.state = QuestStatus.State.IN_PROGRESS;
+		quest.questType = "quest";
+		quest.questPoints = 225;
 
 		JsonObject o = json(quest);
 		assertEquals("Cook's Assistant", o.get("quest_name").getAsString());
 		assertEquals("in_progress", o.get("state").getAsString());
+		assertEquals("quest", o.get("quest_type").getAsString());
+		assertEquals(225, o.get("quest_points").getAsInt());
+	}
+
+	@Test
+	public void questStatusOmitsNullTypeAndPoints()
+	{
+		// Pre-backend-delta compatibility: the additive fields must be absent
+		// (not null) when unset so older payload shapes remain byte-identical.
+		QuestStatus quest = new QuestStatus();
+		quest.rsn = "Zezima";
+		quest.pluginVersion = "1.0.0";
+		quest.questName = "Cook's Assistant";
+		quest.state = QuestStatus.State.COMPLETE;
+
+		JsonObject o = json(quest);
+		assertFalse(o.has("quest_type"));
+		assertFalse(o.has("quest_points"));
 	}
 
 	@Test
@@ -268,6 +288,7 @@ public class DtoSerializationTest
 		bank.pluginVersion = "1.0.0";
 		bank.items = Arrays.asList(new ItemEntry(995, 1_000_000, 1_000_000L));
 		bank.totalValue = 5_000_000_000L; // exceeds 32-bit range
+		bank.valuationMethod = "ge_then_ha_v1";
 
 		JsonObject o = json(bank);
 		JsonArray items = o.getAsJsonArray("items");
@@ -276,6 +297,20 @@ public class DtoSerializationTest
 		assertEquals(1_000_000, item.get("quantity").getAsInt());
 		assertEquals(1_000_000L, item.get("value").getAsLong());
 		assertEquals(5_000_000_000L, o.get("total_value").getAsLong());
+		assertEquals("ge_then_ha_v1", o.get("valuation_method").getAsString());
+	}
+
+	@Test
+	public void bankSnapshotOmitsNullValuationMethod()
+	{
+		BankSnapshot bank = new BankSnapshot();
+		bank.rsn = "Zezima";
+		bank.pluginVersion = "1.0.0";
+		bank.items = Arrays.asList(new ItemEntry(995, 1, 1L));
+		bank.totalValue = 1L;
+
+		JsonObject o = json(bank);
+		assertFalse(o.has("valuation_method"));
 	}
 
 	@Test

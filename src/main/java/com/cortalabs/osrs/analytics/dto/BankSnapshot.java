@@ -20,4 +20,14 @@ public class BankSnapshot extends PluginPayload
 
 	@SerializedName("total_value")
 	public long totalValue;
+
+	/**
+	 * Valuation rule used to compute item values and {@link #totalValue}, so
+	 * downstream consumers never have to guess the methodology (e.g.
+	 * {@code ge_then_ha_v1}: GE price per RuneLite ItemManager, high-alchemy
+	 * fallback for untradeables). Backend contract does not know this field
+	 * yet; pydantic ignores it until the schema delta lands.
+	 */
+	@SerializedName("valuation_method")
+	public String valuationMethod;
 }

@@ -25,4 +25,23 @@ public class QuestStatus extends PluginPayload
 	public String questName;
 
 	public State state;
+
+	/**
+	 * Classification of the entry: {@code quest}, {@code miniquest},
+	 * {@code subquest} (Recipe for Disaster sub-entries) or {@code other}
+	 * (Tutorial Island). The RuneLite Quest enum has no type field, so this is
+	 * derived plugin-side (see QuestCollector#classify). Backend contract does
+	 * not know this field yet; pydantic ignores it until the schema delta lands.
+	 */
+	@SerializedName("quest_type")
+	public String questType;
+
+	/**
+	 * Account-wide quest points at emission time (varp 101,
+	 * {@code net.runelite.api.gameval.VarPlayerID.QP}). Omitted when null.
+	 * Backend contract does not know this field yet; pydantic ignores it until
+	 * the schema delta lands.
+	 */
+	@SerializedName("quest_points")
+	public Integer questPoints;
 }

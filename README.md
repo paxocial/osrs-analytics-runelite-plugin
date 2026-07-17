@@ -16,20 +16,23 @@ For a complete, concrete run/verify walkthrough see [`TESTING.md`](TESTING.md).
 |---|---|---|
 | Sessions | Full | login / logout (with duration) / world-hop |
 | XP | Full | periodic snapshot of all 24 skills (incl. `sailing`), interval configurable |
-| Quests | Full | per-quest state; first snapshot skips unstarted quests, then sends changes; diff state resets per RSN |
-| Achievement diaries | Full | per-tier completion for all 12 regions, source-verified varbits; Karamja's 3-state easy/medium/hard handled correctly |
+| Quests | Full | per-quest state for the full Quest enum (incl. `not_started`), plus quest points (varp 101) and a quest/miniquest/subquest type derived from the OSRS Wiki miniquest list; diff state resets per RSN |
+| Achievement diaries | Full | per-tier completion for all 12 regions; each tier reads BOTH source-verified varbit families (tasks-done `*_DIARY_*_COMPLETE`/`ATJUN_*_DONE` and reward-claimed `*_REWARD`), complete when either is set |
 | Combat achievements | Full | completed-task count per tier (easy → grandmaster), source-verified varbits |
 | Equipment & inventory | Full | worn items (slot → id) + inventory (id, qty), debounced |
 | Loot | Full | NPC / boss / chest / clue / minigame drops with GE values |
 | Activity | Heuristic | coarse region-change signal, clearly labelled as heuristic |
 | Collection log | Full | full-state walk of the log interface (real item ids/names/obtained) + incremental chat detection |
-| Bank | Full | full bank snapshot (ids, quantities, values, total) |
+| Bank | Full | full bank snapshot (ids, quantities, values, total); `ge_then_ha_v1` valuation: GE price, high-alch fallback for untradeables, placeholders excluded |
 
 Diary and combat-achievement varbit ids are **source-verified** against the
-RuneLite client API (`net.runelite.api.Varbits`): diary completion flags at
-L212-270, combat-task counts (`CA_TOTAL_TASKS_COMPLETED_*`) at L970-975. Every id
-is cited in the collector source, and `CollectorVarbitMapTest` guards the maps for
-completeness. See `DiaryCollector.REGION_TIER_VARBITS` and
+RuneLite client API: diary tasks-done flags at `net.runelite.api.Varbits`
+L212-270, diary reward-claimed flags at `net.runelite.api.gameval.VarbitID`
+(`*_REWARD`, matching the ids WikiSync keys diary completion off), combat-task
+counts (`CA_TOTAL_TASKS_COMPLETED_*`) at Varbits L970-975 / VarbitID L8058-8063.
+Every id is cited in the collector source, and `CollectorVarbitMapTest` guards
+the maps for completeness. See `DiaryCollector.REGION_TIER_VARBITS`,
+`DiaryCollector.REGION_TIER_REWARD_VARBITS` and
 `CombatAchievementCollector.TIER_COUNT_VARBITS`.
 
 ## Privacy
@@ -123,9 +126,13 @@ Tests cover:
 - **Lookup** (`LookupClient` with MockWebServer) — parsing the WOM `/players`
   envelope, 404 → not-found, 5xx → error, the `/names/bulk` POST body, and API-root
   derivation from the plugin base URL.
-- **Varbit maps** (`CollectorVarbitMapTest`) — the diary map covers all 12 regions
-  × 4 tiers (48 distinct ids) and the combat-achievement map covers all 6 tiers,
-  each matching the source-verified RuneLite ids.
+- **Varbit maps** (`CollectorVarbitMapTest`) — both diary maps cover all 12
+  regions × 4 tiers (96 distinct ids across the tasks-done and reward-claimed
+  families) and the combat-achievement map covers all 6 tiers, each matching the
+  source-verified RuneLite ids.
+- **Quest classification** (`QuestClassificationTest`) — the 19 wiki-listed
+  miniquests, the ten RFD subquests, and Tutorial Island classify correctly
+  against the live Quest enum; unknown names default to `quest`.
 - **Name-change detection** (`NameChangeCollectorTest`) — the rename predicate
   never fires on first login, same name, case-only changes, or blanks.
 
