@@ -11,6 +11,11 @@ import com.google.gson.annotations.SerializedName;
  */
 public class QuestStatus extends PluginPayload
 {
+	/** {@link #completionProvenance}: the {@code !=complete -> complete} transition was witnessed live. */
+	public static final String PROVENANCE_LIVE_WITNESSED = "live_witnessed";
+	/** {@link #completionProvenance}: the quest is complete; when it was completed is unknown. */
+	public static final String PROVENANCE_WALK_INFERRED = "walk_inferred";
+
 	public enum State
 	{
 		@SerializedName("not_started")
@@ -23,6 +28,16 @@ public class QuestStatus extends PluginPayload
 
 	@SerializedName("quest_name")
 	public String questName;
+
+	/**
+	 * RuneLite {@code Quest.getId()} — the stable v2 identity, immune to display
+	 * renames and diacritics (those live only in {@link #questName}). Always set by
+	 * this plugin; the backend keeps the field nullable so pre-v2 payloads that
+	 * carry no id stay keyed on name. Never 0-as-unknown: a value here is always a
+	 * real id.
+	 */
+	@SerializedName("quest_id")
+	public Integer questId;
 
 	public State state;
 
@@ -44,4 +59,31 @@ public class QuestStatus extends PluginPayload
 	 */
 	@SerializedName("quest_points")
 	public Integer questPoints;
+
+	/**
+	 * How this quest's completion moment was captured — the discriminator that
+	 * keeps {@link #completedAt} honest. One of {@link #PROVENANCE_LIVE_WITNESSED}
+	 * (the plugin saw the {@code !=complete -> complete} transition this session) or
+	 * {@link #PROVENANCE_WALK_INFERRED} (the quest was already complete on the first
+	 * scan for the account, so the moment is unknown). Mirrors
+	 * {@code CollectionLogEntry#captureProvenance}.
+	 */
+	@SerializedName("completion_provenance")
+	public String completionProvenance;
+
+	/**
+	 * ISO-8601 UTC timestamp of the <b>witnessed completion moment</b>, set only
+	 * when {@link #completionProvenance} is {@link #PROVENANCE_LIVE_WITNESSED} — i.e.
+	 * the plugin observed the state cross into complete while it was running.
+	 *
+	 * <p>{@code null} for {@link #PROVENANCE_WALK_INFERRED}: a quest merely found
+	 * already-complete has no knowable completion date, so the moment is left absent
+	 * (Gson omits nulls, dropping the field from the wire). It is never backfilled
+	 * with the scan clock — that would date a years-old completion to the moment the
+	 * plugin first looked. The backend enforces the same invariant: a
+	 * {@code walk_inferred} payload's timestamp is discarded, and a
+	 * {@code live_witnessed} payload without one is rejected.
+	 */
+	@SerializedName("completed_at")
+	public String completedAt;
 }
