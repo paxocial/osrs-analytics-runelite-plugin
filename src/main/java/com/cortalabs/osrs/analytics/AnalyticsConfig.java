@@ -1,331 +1,220 @@
+/*
+ * Copyright (c) 2025, Corta Labs
+ * BSD 2-Clause License. See LICENSE.
+ */
 package com.cortalabs.osrs.analytics;
 
-import java.awt.Color;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
+import net.runelite.client.config.Range;
 
-@ConfigGroup(AnalyticsPlugin.CONFIG_GROUP)
+/**
+ * Configuration for the OSRS Analytics telemetry plugin.
+ *
+ * <p>Everything is config-gated: with {@link #enabled()} off the plugin produces
+ * zero network traffic. Every category is ON by default for this internal
+ * deployment, including the two private categories (bank and collection log),
+ * which stay clearly labelled so opting out is always one click.
+ */
+@ConfigGroup(AnalyticsConfig.GROUP)
 public interface AnalyticsConfig extends Config
 {
-
-	enum CompetitionsToAddToCanvas
-	{
-		NONE,
-		UPCOMING,
-		ONGOING,
-		BOTH
-	}
+	String GROUP = "osrsanalytics";
 
 	@ConfigSection(
-		name = "Group",
-		description = "The group configurations",
+		name = "Connection",
+		description = "Backend endpoint and API key",
+		position = 0
+	)
+	String connectionSection = "connection";
+
+	@ConfigSection(
+		name = "Categories",
+		description = "Which telemetry categories to collect",
 		position = 1
 	)
-	String groupConfig = "groupConfig";
+	String categoriesSection = "categories";
 
 	@ConfigSection(
-		name = "Lookup",
-		description = "Lookup menu option configurations",
+		name = "Private data",
+		description = "Sensitive categories. On by default for this internal deployment; turn off any time.",
 		position = 2
 	)
-	String lookupConfig = "lookupConfig";
+	String privateSection = "private";
 
 	@ConfigSection(
-		name = "Competitions",
-		description = "Competition configurations",
+		name = "Lookup & sync",
+		description = "Player lookup and RSN name-change submission",
 		position = 3
 	)
-	String competitionConfig = "competitionConfig";
+	String lookupSection = "lookup";
 
-	@ConfigSection(
-		name = "Event codeword",
-		description = "Event codeword configurations",
+	// --- Connection ---
+
+	@ConfigItem(
+		keyName = "enabled",
+		name = "Enable telemetry",
+		description = "Master switch. When off, the plugin sends nothing.",
+		section = connectionSection,
+		position = 0
+	)
+	default boolean enabled()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "apiBaseUrl",
+		name = "API base URL",
+		description = "Base URL of the local Catherby plugin API (prefix /api/v1/plugin).",
+		section = connectionSection,
+		position = 1
+	)
+	default String apiBaseUrl()
+	{
+		return "http://localhost:8000/api/v1/plugin";
+	}
+
+	@ConfigItem(
+		keyName = "apiKey",
+		name = "API key",
+		description = "Plugin API token; sent as the X-API-Key header. Never logged.",
+		secret = true,
+		section = connectionSection,
+		position = 2
+	)
+	default String apiKey()
+	{
+		return "";
+	}
+
+	@Range(min = 5, max = 120)
+	@ConfigItem(
+		keyName = "flushIntervalSeconds",
+		name = "Flush interval (seconds)",
+		description = "How often queued events are sent as a batch (kept under the backend rate limit).",
+		section = connectionSection,
+		position = 3
+	)
+	default int flushIntervalSeconds()
+	{
+		return 15;
+	}
+
+	@Range(min = 1, max = 60)
+	@ConfigItem(
+		keyName = "xpSnapshotMinutes",
+		name = "XP snapshot interval (minutes)",
+		description = "How often a full XP snapshot is taken while logged in.",
+		section = connectionSection,
 		position = 4
 	)
-	String eventCodeword = "eventCodeword";
-
-	@ConfigSection(
-		name = "Not Synced Ranks",
-		description = "Ignored Ranks for Analytics sync",
-		position = 5,
-		closedByDefault = true
-	)
-	String ignoredRanks = "ignoredRanks";
-
-	@ConfigItem(
-		keyName = "playerLookupOption",
-		name = "Player option",
-		description = "Add Analytics Lookup option to players",
-		position = 0,
-		section = lookupConfig
-	)
-	default boolean playerLookupOption()
+	default int xpSnapshotMinutes()
 	{
-		return false;
+		return 5;
 	}
 
-	@ConfigItem(
-		keyName = "menuLookupOption",
-		name = "Menu option",
-		description = "Add Analytics Lookup option to menus",
-		position = 1,
-		section = lookupConfig
-	)
-	default boolean menuLookupOption()
+	// --- Categories (on by default) ---
+
+	@ConfigItem(keyName = "trackSessions", name = "Sessions", description = "Login, logout and world-hop events.", section = categoriesSection, position = 0)
+	default boolean trackSessions()
 	{
-		return false;
+		return true;
 	}
 
-	@ConfigItem(
-		keyName = "virtualLevels",
-		name = "Virtual levels",
-		description = "Show virtual levels in the side bar on lookup",
-		position = 2,
-		section = lookupConfig
-	)
-	default boolean virtualLevels()
+	@ConfigItem(keyName = "trackXp", name = "XP", description = "Periodic XP snapshots for all skills.", section = categoriesSection, position = 1)
+	default boolean trackXp()
 	{
-		return false;
+		return true;
 	}
 
-	@ConfigItem(
-		keyName = "relativeTime",
-		name = "Relative time",
-		description = "Display last updated time relative to current date and time",
-		position = 3,
-		section = lookupConfig
-	)
-	default boolean relativeTime()
+	@ConfigItem(keyName = "trackQuests", name = "Quests", description = "Quest completion state changes.", section = categoriesSection, position = 2)
+	default boolean trackQuests()
 	{
-		return false;
+		return true;
 	}
 
-	@ConfigItem(
-		keyName = "importGroup",
-		name = "Import Group option",
-		description = "Add Import Analytics Group menu option to the clan chat tab",
-		position = 1,
-		section = groupConfig
-	)
-	default boolean importGroup()
+	@ConfigItem(keyName = "trackDiaries", name = "Achievement diaries", description = "Diary tier completion for all twelve regions.", section = categoriesSection, position = 3)
+	default boolean trackDiaries()
 	{
-		return false;
+		return true;
 	}
 
-	@ConfigItem(
-		keyName = "browseGroup",
-		name = "Browse Group option",
-		description = "Add Browse Analytics Group menu option to the clan chat tab",
-		position = 2,
-		section = groupConfig
-	)
-	default boolean browseGroup()
+	@ConfigItem(keyName = "trackCombatAchievements", name = "Combat achievements", description = "Completed-task counts per combat achievement tier.", section = categoriesSection, position = 4)
+	default boolean trackCombatAchievements()
 	{
-		return false;
+		return true;
 	}
 
+	@ConfigItem(keyName = "trackEquipment", name = "Equipment & inventory", description = "Worn equipment and inventory snapshots.", section = categoriesSection, position = 5)
+	default boolean trackEquipment()
+	{
+		return true;
+	}
+
+	@ConfigItem(keyName = "trackLoot", name = "Loot", description = "Loot drops from NPCs, chests, clues and minigames.", section = categoriesSection, position = 6)
+	default boolean trackLoot()
+	{
+		return true;
+	}
+
+	@ConfigItem(keyName = "trackActivity", name = "Activity", description = "Coarse, heuristic activity signal (region changes).", section = categoriesSection, position = 7)
+	default boolean trackActivity()
+	{
+		return true;
+	}
+
+	// --- Private data (off by default) ---
+
 	@ConfigItem(
-		keyName = "syncClanButton",
-		name = "Sync Clan button",
-		description = "Add a sync clan button to the clan members list in settings if a group is configured",
-		position = 3,
-		section = groupConfig
+		keyName = "trackCollectionLog",
+		name = "Collection log",
+		description = "Collection log additions detected from chat. Private data; on by default, turn off any time.",
+		section = privateSection,
+		position = 0
 	)
-	default boolean syncClanButton()
+	default boolean trackCollectionLog()
 	{
 		return true;
 	}
 
 	@ConfigItem(
-		keyName = "alwaysIncludedOnSync",
-		name = "Always Included",
-		description = "Players that will always be included in the group regardless of clan sync method, comma separated names",
-		position = 4,
-		section = groupConfig
+		keyName = "trackBank",
+		name = "Bank contents",
+		description = "Full bank snapshot (items and values). Private data; on by default, turn off any time.",
+		section = privateSection,
+		position = 1
 	)
-	default String alwaysIncludedOnSync()
+	default boolean trackBank()
 	{
-		return "";
+		return true;
 	}
 
-	@ConfigItem(
-		keyName = "groupId",
-		name = "Group Id",
-		description = "The group id in Analytics",
-		position = 5,
-		section = groupConfig
-	)
-	default int groupId()
-	{
-		return 0;
-	}
+	// --- Lookup & sync ---
 
 	@ConfigItem(
-		keyName = "verificationCode",
-		name = "Verification code",
-		description = "Verification code for the Analytics group",
-		secret = true,
-		position = 6,
-		section = groupConfig
+		keyName = "enableLookup",
+		name = "Right-click player lookup",
+		description = "Add an 'Analytics lookup' option to player right-click menus and enable the panel Lookup tab.",
+		section = lookupSection,
+		position = 0
 	)
-	default String verificationCode()
-	{
-		return "";
-	}
-
-	@ConfigItem(
-		keyName = "competitionLoginMessage",
-		name = "Login info",
-		description = "Show ongoing competition info when logging in",
-		position = 1,
-		section = competitionConfig
-	)
-	default boolean competitionLoginMessage()
-	{
-		return false;
-	}
-
-	@ConfigItem(
-		keyName = "sendCompetitionNotification",
-		name = "Competition Notifications",
-		description = "Sends notifications at start and end times for competitions",
-		position = 2,
-		section = competitionConfig
-	)
-	default boolean sendCompetitionNotification()
-	{
-		return false;
-	}
-
-	@ConfigItem(
-		keyName = "addCompetitionsToCanvas",
-		name = "Auto add to canvas",
-		description = "Automatically add competitions to canvas",
-		position = 3,
-		section = competitionConfig
-	)
-	default CompetitionsToAddToCanvas addCompetitionsToCanvas()
-	{
-		return CompetitionsToAddToCanvas.NONE;
-	}
-
-	@ConfigItem(
-		keyName = "displayCodeword",
-		name = "Display codeword",
-		description = "Displays an event codeword overlay",
-		position = 13,
-		section = eventCodeword
-	)
-	default boolean displayCodeword()
-	{
-		return false;
-	}
-
-	@ConfigItem(
-		keyName = "configuredCodeword",
-		name = "Codeword",
-		description = "Event codeword",
-		position = 14,
-		section = eventCodeword
-	)
-	default String configuredCodeword()
-	{
-		return "AnalyticsCodeword";
-	}
-
-	@ConfigItem(
-		keyName = "showTimestamp",
-		name = "Show timestamp",
-		description = "Attach a timestamp to the codeword",
-		position = 15,
-		section = eventCodeword
-	)
-	default boolean showTimestamp()
+	default boolean enableLookup()
 	{
 		return true;
 	}
 
 	@ConfigItem(
-		keyName = "codewordColor",
-		name = "Codeword color",
-		description = "Overlay codeword color",
-		position = 16,
-		section = eventCodeword
+		keyName = "submitNameChanges",
+		name = "Submit RSN name changes",
+		description = "When your display name changes, submit the old/new name to the backend once.",
+		section = lookupSection,
+		position = 1
 	)
-	default Color codewordColor()
+	default boolean submitNameChanges()
 	{
-		return new Color(0x00FF6A);
+		return true;
 	}
-
-	@ConfigItem(
-		keyName = "timestampColor",
-		name = "Timestamp color",
-		description = "Overlay timestamp color",
-		position = 16,
-		section = eventCodeword
-	)
-	default Color timestampColor()
-	{
-		return new Color(0xFFFFFF);
-	}
-
-	@ConfigItem(
-		keyName = "ignoredRanksDisplay",
-		name = "Ignored Ranks from Analytics Sync",
-		description = "List of ignored ranks from Analytics Sync (read only)",
-		position = 17,
-		section = ignoredRanks
-	)
-	default String ignoredRanksDisplay()
-	{
-		return "";
-	}
-
-	@ConfigItem(
-		keyName = "ignoredRanks",
-		name = "",
-		description = "",
-		hidden = true
-	)
-	default String ignoredRanks()
-	{
-		return "[]";
-	}
-
-	@ConfigItem(
-		keyName = "ignoredRanks",
-		name = "",
-		description = "",
-		hidden = true
-	)
-	void ignoredRanks(String value);
-
-	@ConfigItem(
-		keyName = "ignoredRanksDisplay",
-		name = "",
-		description = "",
-		hidden = true
-	)
-	void ignoreRanksDisplay(String value);
-
-	@ConfigItem(
-		keyName = "competitionsOnCanvas",
-		name = "",
-		description = "",
-		hidden = true
-	)
-	default String competitionsOnCanvas()
-	{
-		return "[]";
-	}
-
-	@ConfigItem(
-		keyName = "competitionsOnCanvas",
-		name = "",
-		description = "",
-		hidden = true
-	)
-	void competitionsOnCanvas(String value);
 }

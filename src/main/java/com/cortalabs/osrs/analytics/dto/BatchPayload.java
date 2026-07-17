@@ -1,0 +1,40 @@
+/*
+ * Copyright (c) 2025, Corta Labs
+ * BSD 2-Clause License. See LICENSE.
+ */
+package com.cortalabs.osrs.analytics.dto;
+
+import com.google.gson.annotations.SerializedName;
+import java.util.List;
+
+/**
+ * Batch submission carrying multiple event categories in one request.
+ * Mirrors {@code BatchPayload}: the wrapper itself carries the common
+ * {@link PluginPayload} fields (the backend resolves the account from the
+ * batch-level {@code rsn}), and every category list is optional.
+ */
+public class BatchPayload extends PluginPayload
+{
+	public List<SessionEvent> sessions;
+
+	@SerializedName("xp_snapshots")
+	public List<XpSnapshot> xpSnapshots;
+
+	@SerializedName("collection_log")
+	public List<CollectionLogEntry> collectionLog;
+
+	public List<QuestStatus> quests;
+
+	public List<DiaryProgress> diaries;
+
+	@SerializedName("combat_achievements")
+	public List<CombatAchievementProgress> combatAchievements;
+
+	public List<EquipmentState> equipment;
+
+	public List<LootDrop> loot;
+
+	public List<ActivityUpdate> activity;
+
+	public List<BankSnapshot> bank;
+}

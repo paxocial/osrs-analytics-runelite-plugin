@@ -1,0 +1,334 @@
+/*
+ * Copyright (c) 2025, Corta Labs
+ * BSD 2-Clause License. See LICENSE.
+ */
+package com.cortalabs.osrs.analytics.dto;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import org.junit.Test;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+
+/**
+ * Golden tests asserting that each DTO serializes to the exact JSON shape the
+ * backend pydantic contract requires (field names, enum string values, nesting).
+ * Contract source: catherby {@code src/catherby/api/schemas/plugin.py}.
+ */
+public class DtoSerializationTest
+{
+	private static final Gson GSON = new Gson();
+
+	private static final List<String> REQUIRED_SKILLS = Arrays.asList(
+		"attack", "defence", "strength", "hitpoints", "ranged", "prayer", "magic",
+		"cooking", "woodcutting", "fletching", "fishing", "firemaking", "crafting",
+		"smithing", "mining", "herblore", "agility", "thieving", "slayer", "farming",
+		"runecraft", "hunter", "construction", "sailing");
+
+	@SuppressWarnings("deprecation")
+	private static JsonObject json(Object value)
+	{
+		return new JsonParser().parse(GSON.toJson(value)).getAsJsonObject();
+	}
+
+	@Test
+	public void sessionEventUsesContractFields()
+	{
+		SessionEvent event = new SessionEvent();
+		event.rsn = "Zezima";
+		event.world = 330;
+		event.timestamp = "2026-07-16T18:41:02.123Z";
+		event.pluginVersion = "1.0.0";
+		event.sessionId = "sid-1";
+		event.event = SessionEvent.EventType.LOGIN;
+		event.durationSeconds = null;
+
+		JsonObject o = json(event);
+		assertEquals("Zezima", o.get("rsn").getAsString());
+		assertEquals(330, o.get("world").getAsInt());
+		assertEquals("2026-07-16T18:41:02.123Z", o.get("timestamp").getAsString());
+		assertEquals("1.0.0", o.get("plugin_version").getAsString());
+		assertEquals("sid-1", o.get("session_id").getAsString());
+		assertEquals("login", o.get("event").getAsString());
+		// null optional must be absent, not null.
+		assertFalse(o.has("duration_seconds"));
+	}
+
+	@Test
+	public void sessionEnumValuesMatchContract()
+	{
+		assertEquals("\"login\"", GSON.toJson(SessionEvent.EventType.LOGIN));
+		assertEquals("\"logout\"", GSON.toJson(SessionEvent.EventType.LOGOUT));
+		assertEquals("\"world_hop\"", GSON.toJson(SessionEvent.EventType.WORLD_HOP));
+	}
+
+	@Test
+	public void logoutCarriesDuration()
+	{
+		SessionEvent event = new SessionEvent();
+		event.rsn = "Zezima";
+		event.pluginVersion = "1.0.0";
+		event.event = SessionEvent.EventType.LOGOUT;
+		event.durationSeconds = 3600;
+
+		JsonObject o = json(event);
+		assertEquals("logout", o.get("event").getAsString());
+		assertEquals(3600, o.get("duration_seconds").getAsInt());
+	}
+
+	@Test
+	public void xpSnapshotContainsAllTwentyFourSkills()
+	{
+		Map<String, Integer> skills = new LinkedHashMap<>();
+		for (String s : REQUIRED_SKILLS)
+		{
+			skills.put(s, 100);
+		}
+		XpSnapshot snap = new XpSnapshot();
+		snap.rsn = "Zezima";
+		snap.pluginVersion = "1.0.0";
+		snap.skills = skills;
+
+		JsonObject o = json(snap);
+		JsonObject skillsJson = o.getAsJsonObject("skills");
+		assertEquals(24, skillsJson.entrySet().size());
+		for (String s : REQUIRED_SKILLS)
+		{
+			assertTrue("missing skill " + s, skillsJson.has(s));
+		}
+		assertTrue("sailing must be present", skillsJson.has("sailing"));
+	}
+
+	@Test
+	public void collectionLogEntryUsesContractFields()
+	{
+		CollectionLogEntry entry = new CollectionLogEntry();
+		entry.rsn = "Zezima";
+		entry.pluginVersion = "1.0.0";
+		entry.itemId = 0;
+		entry.itemName = "Pet chaos elemental";
+		entry.quantity = 1;
+		entry.source = "Collection Log";
+		entry.obtainedAt = "2026-07-16T18:41:02.123Z";
+
+		JsonObject o = json(entry);
+		assertEquals(0, o.get("item_id").getAsInt());
+		assertEquals("Pet chaos elemental", o.get("item_name").getAsString());
+		assertEquals(1, o.get("quantity").getAsInt());
+		assertEquals("Collection Log", o.get("source").getAsString());
+		assertEquals("2026-07-16T18:41:02.123Z", o.get("obtained_at").getAsString());
+	}
+
+	@Test
+	public void questStatusUsesContractFields()
+	{
+		QuestStatus quest = new QuestStatus();
+		quest.rsn = "Zezima";
+		quest.pluginVersion = "1.0.0";
+		quest.questName = "Cook's Assistant";
+		quest.state = QuestStatus.State.IN_PROGRESS;
+
+		JsonObject o = json(quest);
+		assertEquals("Cook's Assistant", o.get("quest_name").getAsString());
+		assertEquals("in_progress", o.get("state").getAsString());
+	}
+
+	@Test
+	public void questEnumValuesMatchContract()
+	{
+		assertEquals("\"not_started\"", GSON.toJson(QuestStatus.State.NOT_STARTED));
+		assertEquals("\"in_progress\"", GSON.toJson(QuestStatus.State.IN_PROGRESS));
+		assertEquals("\"complete\"", GSON.toJson(QuestStatus.State.COMPLETE));
+	}
+
+	@Test
+	public void diaryProgressSerializesAllTierBooleans()
+	{
+		DiaryProgress diary = new DiaryProgress();
+		diary.rsn = "Zezima";
+		diary.pluginVersion = "1.0.0";
+		diary.region = "Varrock";
+		diary.easy = true;
+		diary.medium = true;
+		diary.hard = false;
+		diary.elite = false;
+
+		JsonObject o = json(diary);
+		assertEquals("Varrock", o.get("region").getAsString());
+		assertTrue(o.get("easy").getAsBoolean());
+		assertTrue(o.get("medium").getAsBoolean());
+		assertFalse(o.get("hard").getAsBoolean());
+		assertFalse(o.get("elite").getAsBoolean());
+	}
+
+	@Test
+	public void combatAchievementProgressUsesContractFields()
+	{
+		Map<String, Integer> tiers = new LinkedHashMap<>();
+		tiers.put("easy", 5);
+		tiers.put("medium", 3);
+		CombatAchievementProgress ca = new CombatAchievementProgress();
+		ca.rsn = "Zezima";
+		ca.pluginVersion = "1.0.0";
+		ca.tierProgress = tiers;
+		ca.completedTasks = Arrays.asList("Task A", "Task B");
+
+		JsonObject o = json(ca);
+		JsonObject tp = o.getAsJsonObject("tier_progress");
+		assertEquals(5, tp.get("easy").getAsInt());
+		assertEquals(3, tp.get("medium").getAsInt());
+		JsonArray tasks = o.getAsJsonArray("completed_tasks");
+		assertEquals(2, tasks.size());
+		assertEquals("Task A", tasks.get(0).getAsString());
+	}
+
+	@Test
+	public void equipmentStateSlotsMapToIntIds()
+	{
+		Map<String, Integer> equipment = new LinkedHashMap<>();
+		equipment.put("weapon", 4151);
+		equipment.put("shield", 8850);
+		EquipmentState eq = new EquipmentState();
+		eq.rsn = "Zezima";
+		eq.pluginVersion = "1.0.0";
+		eq.equipment = equipment;
+		eq.inventory = Arrays.asList(new ItemEntry(995, 1000));
+
+		JsonObject o = json(eq);
+		JsonObject equip = o.getAsJsonObject("equipment");
+		assertEquals(4151, equip.get("weapon").getAsInt());
+		assertEquals(8850, equip.get("shield").getAsInt());
+		JsonArray inv = o.getAsJsonArray("inventory");
+		JsonObject item = inv.get(0).getAsJsonObject();
+		assertEquals(995, item.get("item_id").getAsInt());
+		assertEquals(1000, item.get("quantity").getAsInt());
+		// inventory items must NOT carry a value key.
+		assertFalse(item.has("value"));
+	}
+
+	@Test
+	public void lootDropUsesContractFields()
+	{
+		LootDrop loot = new LootDrop();
+		loot.rsn = "Zezima";
+		loot.pluginVersion = "1.0.0";
+		loot.itemId = 11832;
+		loot.itemName = "Bandos chestplate";
+		loot.quantity = 1;
+		loot.geValue = 20_000_000L;
+		loot.source = "General Graardor";
+		loot.sourceType = LootDrop.SourceType.BOSS;
+
+		JsonObject o = json(loot);
+		assertEquals(11832, o.get("item_id").getAsInt());
+		assertEquals("Bandos chestplate", o.get("item_name").getAsString());
+		assertEquals(1, o.get("quantity").getAsInt());
+		assertEquals(20_000_000L, o.get("ge_value").getAsLong());
+		assertEquals("General Graardor", o.get("source").getAsString());
+		assertEquals("boss", o.get("source_type").getAsString());
+	}
+
+	@Test
+	public void lootSourceEnumValuesMatchContract()
+	{
+		assertEquals("\"npc\"", GSON.toJson(LootDrop.SourceType.NPC));
+		assertEquals("\"boss\"", GSON.toJson(LootDrop.SourceType.BOSS));
+		assertEquals("\"chest\"", GSON.toJson(LootDrop.SourceType.CHEST));
+		assertEquals("\"clue\"", GSON.toJson(LootDrop.SourceType.CLUE));
+		assertEquals("\"minigame\"", GSON.toJson(LootDrop.SourceType.MINIGAME));
+		assertEquals("\"other\"", GSON.toJson(LootDrop.SourceType.OTHER));
+	}
+
+	@Test
+	public void activityUpdateOmitsNullDetail()
+	{
+		ActivityUpdate activity = new ActivityUpdate();
+		activity.rsn = "Zezima";
+		activity.pluginVersion = "1.0.0";
+		activity.activity = "region_change";
+		activity.detail = null;
+
+		JsonObject o = json(activity);
+		assertEquals("region_change", o.get("activity").getAsString());
+		assertFalse(o.has("detail"));
+	}
+
+	@Test
+	public void bankSnapshotUsesContractFields()
+	{
+		BankSnapshot bank = new BankSnapshot();
+		bank.rsn = "Zezima";
+		bank.pluginVersion = "1.0.0";
+		bank.items = Arrays.asList(new ItemEntry(995, 1_000_000, 1_000_000L));
+		bank.totalValue = 5_000_000_000L; // exceeds 32-bit range
+
+		JsonObject o = json(bank);
+		JsonArray items = o.getAsJsonArray("items");
+		JsonObject item = items.get(0).getAsJsonObject();
+		assertEquals(995, item.get("item_id").getAsInt());
+		assertEquals(1_000_000, item.get("quantity").getAsInt());
+		assertEquals(1_000_000L, item.get("value").getAsLong());
+		assertEquals(5_000_000_000L, o.get("total_value").getAsLong());
+	}
+
+	@Test
+	public void batchPayloadUsesContractListNames()
+	{
+		BatchPayload batch = new BatchPayload();
+		batch.rsn = "Zezima";
+		batch.world = 330;
+		batch.pluginVersion = "1.0.0";
+
+		XpSnapshot snap = new XpSnapshot();
+		snap.rsn = "Zezima";
+		snap.pluginVersion = "1.0.0";
+		Map<String, Integer> skills = new LinkedHashMap<>();
+		for (String s : REQUIRED_SKILLS)
+		{
+			skills.put(s, 1);
+		}
+		snap.skills = skills;
+		batch.xpSnapshots = Arrays.asList(snap);
+
+		CollectionLogEntry cl = new CollectionLogEntry();
+		cl.rsn = "Zezima";
+		cl.pluginVersion = "1.0.0";
+		cl.itemId = 0;
+		cl.itemName = "Pet";
+		cl.quantity = 1;
+		cl.source = "Collection Log";
+		cl.obtainedAt = "2026-07-16T18:41:02Z";
+		batch.collectionLog = Arrays.asList(cl);
+
+		JsonObject o = json(batch);
+		assertEquals("Zezima", o.get("rsn").getAsString());
+		assertEquals("1.0.0", o.get("plugin_version").getAsString());
+		assertTrue("batch must use xp_snapshots", o.has("xp_snapshots"));
+		assertTrue("batch must use collection_log", o.has("collection_log"));
+		assertEquals(1, o.getAsJsonArray("xp_snapshots").size());
+		// nested xp snapshot keeps its own contract skills object
+		JsonObject nested = o.getAsJsonArray("xp_snapshots").get(0).getAsJsonObject();
+		assertEquals(24, nested.getAsJsonObject("skills").entrySet().size());
+	}
+
+	@Test
+	public void batchOmitsEmptyCategories()
+	{
+		BatchPayload batch = new BatchPayload();
+		batch.rsn = "Zezima";
+		batch.pluginVersion = "1.0.0";
+
+		JsonObject o = json(batch);
+		// Unset category lists are null -> omitted, matching "submit only what changed".
+		assertFalse(o.has("sessions"));
+		assertFalse(o.has("loot"));
+		assertFalse(o.has("bank"));
+	}
+}

@@ -20,14 +20,18 @@ dependencies {
 
 	testImplementation 'junit:junit:4.12'
 	testImplementation group: 'net.runelite', name:'client', version: runeLiteVersion
+	// MockWebServer pulls in a matching okhttp3 for the transport tests.
+	testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+	testCompileOnly 'org.projectlombok:lombok:1.18.30'
+	testAnnotationProcessor 'org.projectlombok:lombok:1.18.30'
 }
 
 group = 'com.cortalabs.osrs.analytics'
-version = '0.1.0'
-sourceCompatibility = '1.8'
+version = '1.0.0'
 
 tasks.withType(JavaCompile) {
 	options.encoding = 'UTF-8'
+	options.release = 11
 }
 
 task createProperties(dependsOn: processResources) {
@@ -38,4 +42,18 @@ task createProperties(dependsOn: processResources) {
 
 classes {
 	dependsOn createProperties
+}
+
+// Dev launcher: starts RuneLite with this plugin loaded via the test harness.
+// The RuneLite client is a testImplementation dependency, so the launch main
+// (AnalyticsPluginTest) runs on the test runtime classpath. Requires a display.
+tasks.register('run', JavaExec) {
+	group = 'application'
+	description = 'Launch RuneLite with the OSRS Analytics plugin loaded (dev harness).'
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.cortalabs.osrs.analytics.AnalyticsPluginTest'
+	// RuneLite's ExternalPluginManager.loadBuiltin asserts that assertions are on.
+	enableAssertions = true
+	// RuneLite only loads built-in/side-loaded plugins in developer mode.
+	args = ['--developer-mode']
 }
