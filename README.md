@@ -1,4 +1,4 @@
-# OSRS Analytics RuneLite Plugin
+# Catherby Analytics RuneLite Plugin
 
 RuneLite plugin that captures gameplay telemetry and streams it to a **local
 Catherby analytics backend** over HTTP. Everything is config-gated: disabling the
@@ -114,7 +114,7 @@ Requires JDK 17 (compiles to release 11). The RuneLite client resolves from
 
 ```bash
 ./gradlew clean build   # compile + package
-./gradlew test          # run the JUnit 4 test suite (48 tests)
+./gradlew test          # run the JUnit 4 test suite (72 tests)
 ./gradlew run           # launch RuneLite with the plugin loaded (dev harness)
 ```
 

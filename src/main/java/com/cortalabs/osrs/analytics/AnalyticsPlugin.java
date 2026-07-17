@@ -59,7 +59,7 @@ import net.runelite.client.util.Text;
  */
 @Slf4j
 @PluginDescriptor(
-	name = "OSRS Analytics",
+	name = "Catherby Analytics",
 	description = "Opt-in telemetry: streams gameplay snapshots to a local Catherby analytics backend.",
 	tags = {"analytics", "telemetry", "xp", "clan", "osrs", "cortalabs"}
 )
@@ -161,7 +161,7 @@ public class AnalyticsPlugin extends Plugin
 
 		panel = new AnalyticsPanel(analyticsClient, lookupClient);
 		navButton = NavigationButton.builder()
-			.tooltip("OSRS Analytics")
+			.tooltip("Catherby Analytics")
 			.icon(buildIcon())
 			.priority(8)
 			.panel(panel)
@@ -174,7 +174,7 @@ public class AnalyticsPlugin extends Plugin
 			menuManager.addPlayerMenuItem(LOOKUP);
 		}
 
-		log.debug("OSRS Analytics started (enabled={})", config.enabled());
+		log.debug("Catherby Analytics started (enabled={})", config.enabled());
 	}
 
 	@Override
@@ -200,7 +200,7 @@ public class AnalyticsPlugin extends Plugin
 			collectors = null;
 		}
 		analyticsClient.stop();
-		log.debug("OSRS Analytics stopped");
+		log.debug("Catherby Analytics stopped");
 	}
 
 	@Subscribe

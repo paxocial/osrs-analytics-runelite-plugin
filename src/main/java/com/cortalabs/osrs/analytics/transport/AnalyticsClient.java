@@ -538,7 +538,7 @@ public class AnalyticsClient
 	{
 		if (!notifiedAuth && notifier != null)
 		{
-			notifier.notify("OSRS Analytics: API key rejected. Update it in the plugin config.");
+			notifier.notify("Catherby Analytics: API key rejected. Update it in the plugin config.");
 		}
 		notifiedAuth = true;
 	}
@@ -547,7 +547,7 @@ public class AnalyticsClient
 	{
 		if (!notifiedUnregistered && notifier != null)
 		{
-			notifier.notify("OSRS Analytics: this RSN is not registered with the backend yet. "
+			notifier.notify("Catherby Analytics: this RSN is not registered with the backend yet. "
 				+ "Register it in Catherby, then telemetry resumes automatically.");
 		}
 		notifiedUnregistered = true;
@@ -557,7 +557,7 @@ public class AnalyticsClient
 	{
 		if (notifier != null)
 		{
-			notifier.notify("OSRS Analytics: connected — telemetry flowing.");
+			notifier.notify("Catherby Analytics: connected — telemetry flowing.");
 		}
 	}
 

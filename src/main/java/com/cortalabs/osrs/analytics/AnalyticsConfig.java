@@ -11,7 +11,7 @@ import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
 
 /**
- * Configuration for the OSRS Analytics telemetry plugin.
+ * Configuration for the Catherby Analytics telemetry plugin.
  *
  * <p>Everything is config-gated: with {@link #enabled()} off the plugin produces
  * zero network traffic. Every category is ON by default for this internal

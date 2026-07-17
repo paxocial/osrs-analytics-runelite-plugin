@@ -215,7 +215,7 @@ public class AnalyticsClientTest
 		assertEquals(AnalyticsClient.State.OK, client.getState());
 		assertEquals(0, client.queueSize());
 		assertEquals("recovery notice fires once on success after an interruption",
-			"OSRS Analytics: connected — telemetry flowing.", notices.get(notices.size() - 1));
+			"Catherby Analytics: connected — telemetry flowing.", notices.get(notices.size() - 1));
 	}
 
 	@Test

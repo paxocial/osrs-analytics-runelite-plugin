@@ -1,4 +1,4 @@
-# Testing the OSRS Analytics plugin end to end
+# Testing the Catherby Analytics plugin end to end
 
 This is the concrete path from "nothing running" to "rows landing in Postgres and
 showing in the dashboard." It uses only things that exist today — no placeholder
@@ -42,7 +42,7 @@ python scripts/mint_plugin_token.py mint --label "RuneLite" \
     --scopes plugin:ingest,plugin:read
 ```
 
-Copy the printed token. In RuneLite, open the **OSRS Analytics** config and paste
+Copy the printed token. In RuneLite, open the **Catherby Analytics** config and paste
 it into **API key**. The key is sent only as the `X-API-Key` header and is never
 logged.
 
@@ -102,25 +102,44 @@ two flags RuneLite requires for a built-in plugin: `-ea` (assertions) and
 - **From a Windows checkout:** run the same `gradlew run` in the Windows shell; the
   window opens natively with no display setup.
 
-### Path B — side-load the built jar
-
-Build the jar, then drop it into RuneLite's side-load directory and start RuneLite
-in **developer mode** (side-loading is gated on `--developer-mode` —
-`PluginManager.loadSideLoadPlugins`).
+### Path B — `catherby plugin deploy` + the Desktop launcher (current operator flow)
 
 ```bash
-cd /home/austin/projects/runescape/plugin-hub/osrs-analytics-runelite-plugin
-./gradlew clean build          # produces build/libs/osrs-analytics-1.0.0.jar
+cd /home/austin/projects/runescape/catherby
+catherby plugin deploy
 ```
 
-Copy that jar to the side-load folder, which is `<user home>/.runelite/sideloaded-plugins`:
+This builds the plugin (`./gradlew build`, in WSL) and atomically deploys the
+jar into the Windows side-load directory
+(`%USERPROFILE%\.runelite\sideloaded-plugins\`, i.e.
+`/mnt/c/Users/<you>/.runelite/sideloaded-plugins` from WSL): copy to a `.tmp`
+name, verify size + checksum against the source, remove any other-versioned
+`osrs-analytics-*.jar`, then rename into place — so the directory never holds
+two versions of this plugin at once (RuneLite loads every jar under that
+directory, and two would mean a duplicate plugin class and a broken load).
+`catherby plugin status` compares the built jar's checksum against the
+deployed one.
 
-- **Linux/WSL:** `~/.runelite/sideloaded-plugins/`
-- **Windows:** `%USERPROFILE%\.runelite\sideloaded-plugins\`
+Then launch RuneLite via the Desktop shortcut **`RuneLite Dev (Catherby).bat`**.
+It runs a PowerShell script that starts `net.runelite.client.RuneLite`
+**directly** — not through RuneLite's production launcher — with
+`--developer-mode`. This is required, not optional: RuneLite hard-disables
+developer mode whenever `-Drunelite.launcher.version` is set, and the
+production launcher always sets it, so side-loading (gated on
+`--developer-mode` — `PluginManager.loadSideLoadPlugins`) only works via a
+direct launch like this one. Jagex account sign-in still works because
+`--insecure-write-credentials`, set in the production launcher's own client
+arguments, makes a normal Jagex-launcher session persist `JX_*` credentials to
+`credentials.properties`, which the direct launch then reads — so you still
+need to have opened RuneLite through the normal Jagex launcher at least once
+to seed that file.
 
-Then launch RuneLite with `--developer-mode` (add it to the RuneLite launcher's
-"Client arguments", or run the client jar directly with that flag). The plugin
-appears in the plugin list on start.
+**Manual side-load (no `catherby` CLI):** build with `./gradlew clean build`
+(produces `build/libs/osrs-analytics-<version>.jar`), copy that jar into the
+side-load folder above yourself, then launch with `--developer-mode` any way
+you like (client arguments, or a direct launch as above). The `catherby`
+CLI path is preferred because it's atomic and keeps built vs. deployed jars in
+sync automatically.
 
 ### WSL2 → Windows networking
 
@@ -133,7 +152,7 @@ extra config. (If you ever need the explicit VM IP, `wsl hostname -I` prints it.
 
 ## 5. Verify data is flowing
 
-**a. Watch the panel.** Open the **OSRS Analytics** side panel (bar-chart icon on
+**a. Watch the panel.** Open the **Catherby Analytics** side panel (bar-chart icon on
 the RuneLite toolbar). Log in. Within a flush interval (default 15s) the status
 dot should turn green — **Connected** — and **Accepted (session)** plus the
 per-category counters start climbing (Sessions first, then XP, etc.). Click
@@ -233,6 +252,7 @@ not one flush-interval later.
 | Token mint | `python scripts/mint_plugin_token.py mint --label "RuneLite" --scopes plugin:ingest,plugin:read` |
 | Register RSN | `POST /snapshots/run {"player":"RSN"}` (API root, no /api/v1) |
 | Dev launch | `./gradlew run` (adds `-ea --developer-mode`) |
+| Deploy + launch | `catherby plugin deploy` (from the catherby repo), then the Desktop `RuneLite Dev (Catherby).bat` shortcut |
 | Side-load dir | `~/.runelite/sideloaded-plugins/` (requires `--developer-mode`) |
-| Built jar | `build/libs/osrs-analytics-1.0.0.jar` |
-| Tests | `./gradlew test` — 37 tests |
+| Built jar | `build/libs/osrs-analytics-1.1.0.jar` |
+| Tests | `./gradlew test` — 72 tests |
