@@ -8,6 +8,7 @@ import com.cortalabs.osrs.analytics.dto.ActivityUpdate;
 import com.cortalabs.osrs.analytics.dto.BankSnapshot;
 import com.cortalabs.osrs.analytics.dto.BatchPayload;
 import com.cortalabs.osrs.analytics.dto.CollectionLogEntry;
+import com.cortalabs.osrs.analytics.dto.CollectionPageSummary;
 import com.cortalabs.osrs.analytics.dto.CombatAchievementProgress;
 import com.cortalabs.osrs.analytics.dto.DiaryProgress;
 import com.cortalabs.osrs.analytics.dto.EquipmentState;
@@ -459,6 +460,9 @@ public class AnalyticsClient
 					break;
 				case COLLECTION_LOG:
 					batch.collectionLog = add(batch.collectionLog, (CollectionLogEntry) p);
+					break;
+				case COLLECTION_PAGE:
+					batch.collectionPages = add(batch.collectionPages, (CollectionPageSummary) p);
 					break;
 				case QUEST:
 					batch.quests = add(batch.quests, (QuestStatus) p);

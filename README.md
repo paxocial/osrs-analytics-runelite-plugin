@@ -22,7 +22,7 @@ For a complete, concrete run/verify walkthrough see [`TESTING.md`](TESTING.md).
 | Equipment & inventory | Full | worn items (slot → id) + inventory (id, qty), debounced |
 | Loot | Full | NPC / boss / chest / clue / minigame drops with GE values |
 | Activity | Heuristic | coarse region-change signal, clearly labelled as heuristic |
-| Collection log | Full | full-state walk of the log interface (real item ids/names/obtained) + incremental chat detection |
+| Collection log | Full | full-state walk of the log interface (real item ids/names/obtained) + a per-page completion summary (obtained/total slots + kill counts); incremental chat drops are recorded as append-only activity (the chat line has no item id) so they never collide in the keyed stream |
 | Bank | Full | full bank snapshot (ids, quantities, values, total); `ge_then_ha_v1` valuation: GE price, high-alch fallback for untradeables, placeholders excluded |
 
 Diary and combat-achievement varbit ids are **source-verified** against the
@@ -32,6 +32,12 @@ L970-975 / gameval VarbitID L8058-8063. Every id is cited in the collector
 source, and `CollectorVarbitMapTest` guards the maps for completeness. See
 `DiaryCollector.REGION_TIER_VARBITS` and
 `CombatAchievementCollector.TIER_COUNT_VARBITS`.
+
+Collection log `obtained_at` (and the page-summary timestamp) is the time the
+plugin **first observed** the item/page, **not** the historical date it was
+originally acquired — the collection log exposes no per-item acquisition dates,
+so anything obtained before the plugin ran is stamped with its first-observed
+time.
 
 ## Privacy
 

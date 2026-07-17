@@ -127,6 +127,73 @@ public class DtoSerializationTest
 	}
 
 	@Test
+	public void collectionPageSummaryUsesContractFields()
+	{
+		CollectionPageSummary page = new CollectionPageSummary();
+		page.rsn = "Zezima";
+		page.world = 330;
+		page.timestamp = "2026-07-16T18:41:02.123Z";
+		page.pluginVersion = "1.0.0";
+		page.category = "General Graardor";
+		page.obtainedCount = 5;
+		page.totalSlots = 12;
+		page.killCounts = Arrays.asList(
+			new CollectionPageSummary.KillCount("General Graardor kills", 1234),
+			new CollectionPageSummary.KillCount("Kills", 10));
+
+		JsonObject o = json(page);
+		assertEquals("General Graardor", o.get("category").getAsString());
+		assertEquals(5, o.get("obtained_count").getAsInt());
+		assertEquals(12, o.get("total_slots").getAsInt());
+		// timestamp is the observation time, carried by the base payload.
+		assertEquals("2026-07-16T18:41:02.123Z", o.get("timestamp").getAsString());
+		JsonArray kcs = o.getAsJsonArray("kill_counts");
+		assertEquals(2, kcs.size());
+		JsonObject first = kcs.get(0).getAsJsonObject();
+		assertEquals("General Graardor kills", first.get("name").getAsString());
+		assertEquals(1234, first.get("count").getAsInt());
+	}
+
+	@Test
+	public void collectionPageSummaryOmitsNullKillCounts()
+	{
+		// A page with no kill-count lines omits the field entirely (not []),
+		// matching the "absent means none" wire semantics.
+		CollectionPageSummary page = new CollectionPageSummary();
+		page.rsn = "Zezima";
+		page.pluginVersion = "1.0.0";
+		page.category = "Clue Scrolls (Beginner)";
+		page.obtainedCount = 0;
+		page.totalSlots = 20;
+		page.killCounts = null;
+
+		JsonObject o = json(page);
+		assertFalse(o.has("kill_counts"));
+		assertEquals(0, o.get("obtained_count").getAsInt());
+		assertEquals(20, o.get("total_slots").getAsInt());
+	}
+
+	@Test
+	public void batchCarriesCollectionPages()
+	{
+		BatchPayload batch = new BatchPayload();
+		batch.rsn = "Zezima";
+		batch.pluginVersion = "1.0.0";
+
+		CollectionPageSummary page = new CollectionPageSummary();
+		page.rsn = "Zezima";
+		page.pluginVersion = "1.0.0";
+		page.category = "General Graardor";
+		page.obtainedCount = 1;
+		page.totalSlots = 12;
+		batch.collectionPages = Arrays.asList(page);
+
+		JsonObject o = json(batch);
+		assertTrue("batch must use collection_pages", o.has("collection_pages"));
+		assertEquals(1, o.getAsJsonArray("collection_pages").size());
+	}
+
+	@Test
 	public void questStatusUsesContractFields()
 	{
 		QuestStatus quest = new QuestStatus();

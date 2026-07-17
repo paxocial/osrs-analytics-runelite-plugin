@@ -24,7 +24,13 @@ public class CollectionLogEntry extends PluginPayload
 
 	public String source;
 
-	/** ISO-8601 UTC timestamp when the item was obtained. */
+	/**
+	 * ISO-8601 UTC timestamp when the item was <b>first observed</b> by the plugin
+	 * (chat notice or the walk that first synced it), <b>not</b> the historical
+	 * date the item was originally acquired — the collection log does not expose
+	 * per-item acquisition dates, so items obtained before the plugin was running
+	 * are stamped with their first-observed time.
+	 */
 	@SerializedName("obtained_at")
 	public String obtainedAt;
 }

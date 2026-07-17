@@ -457,6 +457,8 @@ class AnalyticsPanel extends PluginPanel
 				return "XP";
 			case COLLECTION_LOG:
 				return "Collection log";
+			case COLLECTION_PAGE:
+				return "Collection pages";
 			case QUEST:
 				return "Quests";
 			case DIARY:

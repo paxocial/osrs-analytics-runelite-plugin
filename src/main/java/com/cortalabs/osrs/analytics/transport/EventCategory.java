@@ -20,5 +20,9 @@ public enum EventCategory
 	EQUIPMENT,
 	LOOT,
 	ACTIVITY,
-	BANK
+	BANK,
+	// Appended last on purpose: the status panel and AnalyticsClient index
+	// accepted-event counts by ordinal(), so new categories must not shift the
+	// existing ordinals.
+	COLLECTION_PAGE
 }

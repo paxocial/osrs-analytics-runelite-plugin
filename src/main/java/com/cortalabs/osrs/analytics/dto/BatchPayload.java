@@ -23,6 +23,9 @@ public class BatchPayload extends PluginPayload
 	@SerializedName("collection_log")
 	public List<CollectionLogEntry> collectionLog;
 
+	@SerializedName("collection_pages")
+	public List<CollectionPageSummary> collectionPages;
+
 	public List<QuestStatus> quests;
 
 	public List<DiaryProgress> diaries;
