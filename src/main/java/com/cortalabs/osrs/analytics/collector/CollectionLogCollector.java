@@ -11,8 +11,11 @@ import com.cortalabs.osrs.analytics.dto.CollectionPageSummary;
 import com.cortalabs.osrs.analytics.transport.AnalyticsClient;
 import com.cortalabs.osrs.analytics.transport.EventCategory;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -48,7 +51,10 @@ import net.runelite.client.util.Text;
  *       {@code (account_id, item_id)} upsert and clobber it. Instead the moment
  *       is preserved losslessly as an append-only {@link ActivityUpdate}
  *       ({@code activity = "collection_log_drop"}, {@code detail = item name}),
- *       and the real id follows from the next full walk.</li>
+ *       and the real id follows from the next full walk. The moment is
+ *       <i>additionally</i> held in {@link #pendingChatDrops} so the walk that
+ *       resolves the name can stamp the keyed row with the true acquisition
+ *       time — see the join below.</li>
  *   <li><b>Full-state walk</b> — when a collection log category page is drawn
  *       (RuneLite's {@link ScriptID#COLLECTION_DRAW_LIST}), the drawn item slots
  *       on that page are read from {@link InterfaceID.Collection#ITEMS_CONTENTS}
@@ -62,6 +68,23 @@ import net.runelite.client.util.Text;
  *       walk of its category carries the real-id truth.</li>
  * </ul>
  *
+ * <p><b>The join, and why it exists.</b> The chat catch knows <i>when</i> but not
+ * <i>what</i>; the walk knows <i>what</i> but not <i>when</i> — the collection log
+ * interface exposes no per-item acquisition date. Neither alone can honestly date
+ * an item. So a chat catch parks its moment in {@link #pendingChatDrops} keyed by
+ * item name, and the next walk that resolves that name to a real id emits the row
+ * stamped {@code chat_observed} with the <b>chat</b> timestamp. Everything else is
+ * emitted {@code walk_inferred} with <b>no</b> {@code obtained_at} at all: the item
+ * is known to be held, but when it was obtained is genuinely unknown. Stamping the
+ * walk's own clock there — as this collector once did — dates a years-old pet to
+ * the moment the player last opened their log.
+ *
+ * <p>The plugin degrades honestly rather than guessing: a chat catch whose walk
+ * never comes (log never opened, client restarted) emits nothing at all, and the
+ * later walk emits {@code walk_inferred} — the moment is not lost, it survives in
+ * the append-only activity stream. Ambiguity resolves to absence, never to a
+ * guess (see {@link #resolveCaptures}).
+ *
  * <p>This mirrors the WikiSync / RuneLite chat-commands approach to reading the
  * collection log (script + {@code HEADER_TEXT}/{@code ITEMS_CONTENTS} widgets).
  */
@@ -74,6 +97,15 @@ public class CollectionLogCollector
 	/** Child index of the category title inside the collection log header widget. */
 	private static final int HEADER_TITLE_INDEX = 0;
 	private static final int MAX_SOURCE_LENGTH = 100;
+
+	/**
+	 * Cap on {@link #pendingChatDrops}, bounding footprint when a player racks up
+	 * drops without ever opening their log. Eviction is oldest-first and only ever
+	 * costs an {@code obtained_at} (the row still syncs, as {@code walk_inferred},
+	 * and the moment still reaches the backend via the activity stream) — it can
+	 * never produce a wrong date.
+	 */
+	private static final int MAX_PENDING_CHAT_DROPS = 256;
 
 	/**
 	 * A collection log page kill-count line: a label followed by its count, e.g.
@@ -90,6 +122,23 @@ public class CollectionLogCollector
 
 	/** De-dup guard for the full-state walk: "category|itemId" already sent this RSN. */
 	private final Set<String> syncedItems = new HashSet<>();
+
+	/**
+	 * Chat-witnessed acquisition moments awaiting an id: item name -> ISO-8601 chat
+	 * timestamp. Populated by the chat catch, consumed by the walk that resolves the
+	 * name to a real item id. Insertion-ordered with oldest-first eviction at
+	 * {@link #MAX_PENDING_CHAT_DROPS}. Per-RSN, like {@link #syncedItems}: cleared by
+	 * {@link #resetIfRsnChanged} so one account's drop can never date another's item.
+	 */
+	private final Map<String, String> pendingChatDrops = new LinkedHashMap<String, String>()
+	{
+		@Override
+		protected boolean removeEldestEntry(Map.Entry<String, String> eldest)
+		{
+			return size() > MAX_PENDING_CHAT_DROPS;
+		}
+	};
+
 	private String lastRsn;
 
 	@Inject
@@ -123,16 +172,54 @@ public class CollectionLogCollector
 		{
 			return;
 		}
+		resetIfRsnChanged(rsn);
 
-		// The chat line has no item id, so it must NOT enter the keyed
-		// (account_id, item_id) collection-log stream (every id-less row would
-		// clobber the last). Preserve the moment losslessly in the append-only
-		// activity stream; the real id follows from the next full walk.
+		// This is the only moment anyone ever witnesses the acquisition, so it is
+		// recorded twice, for two different jobs. (1) Losslessly, in the append-only
+		// activity stream: the chat line has no item id, so it must NOT enter the
+		// keyed (account_id, item_id) stream (every id-less row would clobber the
+		// last). (2) Parked in pendingChatDrops, so the walk that resolves this name
+		// to a real id can stamp the keyed row with this timestamp rather than its
+		// own clock. Both carry the identical instant.
+		String chatAt = Payloads.isoNow();
+		pendingChatDrops.put(itemName, chatAt);
+
 		ActivityUpdate payload = new ActivityUpdate();
 		Payloads.base(payload, client, rsn);
+		payload.timestamp = chatAt;
 		payload.activity = DROP_ACTIVITY;
 		payload.detail = itemName;
 		analytics.enqueue(EventCategory.ACTIVITY, payload);
+	}
+
+	private void resetIfRsnChanged(String rsn)
+	{
+		if (clearIfAccountChanged(rsn, lastRsn, syncedItems, pendingChatDrops))
+		{
+			lastRsn = rsn;
+		}
+	}
+
+	/**
+	 * Drop all per-account capture state when the logged-in account changes. Both
+	 * collections are per-RSN: the de-dup set because another account's sends say
+	 * nothing about this one's, and the pending drops because stamping account B's
+	 * item with account A's chat moment would invent an acquisition that never
+	 * happened. Takes its state as arguments so that rule is testable with plain
+	 * data rather than a live client.
+	 *
+	 * @return {@code true} when the account changed and the state was cleared
+	 */
+	static boolean clearIfAccountChanged(
+		String rsn, String lastRsn, Set<String> syncedItems, Map<String, String> pendingChatDrops)
+	{
+		if (rsn.equals(lastRsn))
+		{
+			return false;
+		}
+		syncedItems.clear();
+		pendingChatDrops.clear();
+		return true;
 	}
 
 	@Subscribe
@@ -155,11 +242,7 @@ public class CollectionLogCollector
 		{
 			return;
 		}
-		if (!rsn.equals(lastRsn))
-		{
-			lastRsn = rsn;
-			syncedItems.clear();
-		}
+		resetIfRsnChanged(rsn);
 		walkCurrentCategory(rsn);
 	}
 
@@ -190,34 +273,90 @@ public class CollectionLogCollector
 		PageReduction page = reducePage(slots);
 
 		// Per-item keyed entries — obtained only, real ids only (reducePage never
-		// yields an itemId <= 0), de-duped once per RSN per session.
+		// yields an itemId <= 0), de-duped once per RSN per session. Names are
+		// resolved for the whole page before anything is emitted, because the
+		// chat->walk join needs to see all of a page's newly-obtained items at once
+		// to detect an ambiguous name match.
+		List<NamedSlot> newlySeen = new ArrayList<>();
 		for (DrawnSlot slot : page.obtained)
 		{
 			if (!syncedItems.add(category + '|' + slot.itemId))
 			{
 				continue; // already synced this item this session
 			}
-			emitObtained(rsn, category, slot.itemId, slot.quantity);
+			newlySeen.add(new NamedSlot(slot.itemId, itemName(slot.itemId), slot.quantity));
+		}
+		Map<Integer, Capture> captures = resolveCaptures(newlySeen, pendingChatDrops);
+		for (NamedSlot slot : newlySeen)
+		{
+			emitObtained(rsn, category, slot, captures.get(slot.itemId));
 		}
 
 		emitPageSummary(rsn, category, page, header);
 	}
 
-	private void emitObtained(String rsn, String category, int itemId, int quantity)
+	/**
+	 * Join this walk's newly-obtained items against the parked chat moments,
+	 * deciding each item's capture provenance and acquisition time. Consumes every
+	 * pending entry it matches. Pure but for that consumption, so the honesty rules
+	 * below are testable with plain data — no client or widgets involved.
+	 *
+	 * <p>An item is {@code chat_observed} only when exactly one newly-obtained item
+	 * on this page bears the pending name; everything else is {@code walk_inferred}
+	 * with no time. The exactly-one rule matters because two distinct item ids can
+	 * share a display name: attributing the chat moment to whichever was drawn first
+	 * would be a coin flip, and a coin flip that lands wrong is a fabricated
+	 * acquisition date. An ambiguous match is still consumed — a moment that cannot
+	 * be attributed to exactly one item here must not linger to stamp some later
+	 * page's item instead.
+	 */
+	static Map<Integer, Capture> resolveCaptures(List<NamedSlot> newlySeen, Map<String, String> pendingChatDrops)
 	{
-		if (itemId <= 0)
+		Map<String, Integer> nameCounts = new HashMap<>();
+		for (NamedSlot slot : newlySeen)
+		{
+			nameCounts.merge(slot.itemName, 1, Integer::sum);
+		}
+
+		Map<Integer, Capture> captures = new LinkedHashMap<>();
+		for (NamedSlot slot : newlySeen)
+		{
+			String chatAt = pendingChatDrops.remove(slot.itemName);
+			boolean unambiguous = chatAt != null && nameCounts.get(slot.itemName) == 1;
+			captures.put(slot.itemId, unambiguous ? Capture.chatObserved(chatAt) : Capture.walkInferred());
+		}
+		return captures;
+	}
+
+	private void emitObtained(String rsn, String category, NamedSlot slot, Capture capture)
+	{
+		if (slot.itemId <= 0)
 		{
 			// Belt-and-suspenders: the keyed stream must never carry an id <= 0.
 			return;
 		}
 		CollectionLogEntry payload = new CollectionLogEntry();
 		Payloads.base(payload, client, rsn);
-		payload.itemId = itemId;
-		payload.itemName = itemName(itemId);
-		payload.quantity = quantity;
-		payload.source = clamp(category);
-		payload.obtainedAt = Payloads.isoNow();
+		applyCapture(payload, slot, clamp(category), capture);
 		analytics.enqueue(EventCategory.COLLECTION_LOG, payload);
+	}
+
+	/**
+	 * Copy one resolved capture onto the outgoing payload. Split out from
+	 * {@link #emitObtained} and kept client-free so the no-fallback rule is directly
+	 * testable: {@code obtained_at} is whatever the capture resolved to, and there
+	 * is deliberately no {@code else stamp isoNow()} branch. That branch is exactly
+	 * what this collector used to do, and it is what dated every already-obtained
+	 * item to the moment the player opened their log.
+	 */
+	static void applyCapture(CollectionLogEntry payload, NamedSlot slot, String source, Capture capture)
+	{
+		payload.itemId = slot.itemId;
+		payload.itemName = slot.itemName;
+		payload.quantity = slot.quantity;
+		payload.source = source;
+		payload.captureProvenance = capture.provenance;
+		payload.obtainedAt = capture.obtainedAt;
 	}
 
 	private void emitPageSummary(String rsn, String category, PageReduction page, Widget header)
@@ -370,6 +509,48 @@ public class CollectionLogCollector
 	private static String clamp(String value)
 	{
 		return value.length() > MAX_SOURCE_LENGTH ? value.substring(0, MAX_SOURCE_LENGTH) : value;
+	}
+
+	/** A newly-obtained slot with its item name resolved, ready for the chat join. */
+	static final class NamedSlot
+	{
+		final int itemId;
+		final String itemName;
+		final int quantity;
+
+		NamedSlot(int itemId, String itemName, int quantity)
+		{
+			this.itemId = itemId;
+			this.itemName = itemName;
+			this.quantity = quantity;
+		}
+	}
+
+	/**
+	 * How one item's acquisition moment was captured, and the moment itself when it
+	 * is known. {@link #obtainedAt} is non-null if and only if {@link #provenance}
+	 * is {@code chat_observed} — the invariant the whole join exists to hold.
+	 */
+	static final class Capture
+	{
+		final String provenance;
+		final String obtainedAt;
+
+		private Capture(String provenance, String obtainedAt)
+		{
+			this.provenance = provenance;
+			this.obtainedAt = obtainedAt;
+		}
+
+		static Capture chatObserved(String obtainedAt)
+		{
+			return new Capture(CollectionLogEntry.PROVENANCE_CHAT_OBSERVED, obtainedAt);
+		}
+
+		static Capture walkInferred()
+		{
+			return new Capture(CollectionLogEntry.PROVENANCE_WALK_INFERRED, null);
+		}
 	}
 
 	/** One drawn collection log item cell: its item id, quantity, and opacity. */

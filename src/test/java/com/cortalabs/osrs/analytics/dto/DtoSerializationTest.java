@@ -112,18 +112,51 @@ public class DtoSerializationTest
 		CollectionLogEntry entry = new CollectionLogEntry();
 		entry.rsn = "Zezima";
 		entry.pluginVersion = "1.0.0";
-		entry.itemId = 0;
+		entry.itemId = 11995;
 		entry.itemName = "Pet chaos elemental";
 		entry.quantity = 1;
 		entry.source = "Collection Log";
+		entry.captureProvenance = CollectionLogEntry.PROVENANCE_CHAT_OBSERVED;
 		entry.obtainedAt = "2026-07-16T18:41:02.123Z";
 
 		JsonObject o = json(entry);
-		assertEquals(0, o.get("item_id").getAsInt());
+		assertEquals(11995, o.get("item_id").getAsInt());
 		assertEquals("Pet chaos elemental", o.get("item_name").getAsString());
 		assertEquals(1, o.get("quantity").getAsInt());
 		assertEquals("Collection Log", o.get("source").getAsString());
+		assertEquals("chat_observed", o.get("capture_provenance").getAsString());
 		assertEquals("2026-07-16T18:41:02.123Z", o.get("obtained_at").getAsString());
+	}
+
+	@Test
+	public void collectionLogEntryOmitsObtainedAtWhenWalkInferred()
+	{
+		// The honest wire shape for an item whose acquisition moment is unknown:
+		// obtained_at is ABSENT, not null, not 0, not an epoch. Gson drops nulls,
+		// and the backend contract treats the missing field as "unknown".
+		CollectionLogEntry entry = new CollectionLogEntry();
+		entry.rsn = "Zezima";
+		entry.pluginVersion = "1.0.0";
+		entry.itemId = 11832;
+		entry.itemName = "Bandos chestplate";
+		entry.quantity = 1;
+		entry.source = "General Graardor";
+		entry.captureProvenance = CollectionLogEntry.PROVENANCE_WALK_INFERRED;
+		entry.obtainedAt = null;
+
+		JsonObject o = json(entry);
+		assertEquals("walk_inferred", o.get("capture_provenance").getAsString());
+		assertFalse("walk_inferred must not put a date on the wire at all", o.has("obtained_at"));
+	}
+
+	@Test
+	public void collectionLogProvenanceValuesMatchTheBackendContract()
+	{
+		// These two strings are the wire contract shared with the pydantic Literal
+		// in catherby src/catherby/api/schemas/plugin.py; drifting either side
+		// silently reclassifies every row.
+		assertEquals("chat_observed", CollectionLogEntry.PROVENANCE_CHAT_OBSERVED);
+		assertEquals("walk_inferred", CollectionLogEntry.PROVENANCE_WALK_INFERRED);
 	}
 
 	@Test
@@ -402,10 +435,11 @@ public class DtoSerializationTest
 		CollectionLogEntry cl = new CollectionLogEntry();
 		cl.rsn = "Zezima";
 		cl.pluginVersion = "1.0.0";
-		cl.itemId = 0;
+		cl.itemId = 11995;
 		cl.itemName = "Pet";
 		cl.quantity = 1;
 		cl.source = "Collection Log";
+		cl.captureProvenance = CollectionLogEntry.PROVENANCE_CHAT_OBSERVED;
 		cl.obtainedAt = "2026-07-16T18:41:02Z";
 		batch.collectionLog = Arrays.asList(cl);
 
