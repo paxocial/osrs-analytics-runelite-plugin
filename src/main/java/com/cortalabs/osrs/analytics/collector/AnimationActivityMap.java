@@ -118,10 +118,24 @@ public final class AnimationActivityMap
 
 	private final Map<Integer, String> idToBucket;
 
-	/** Production: build the map from the live {@link AnimationID} constants. */
+	/**
+	 * Production: build the map from the live {@link AnimationID} constants.
+	 *
+	 * <p><b>Honest degradation — an optional enrichment must never take down capture.</b>
+	 * The reflection step is routed through {@link #buildFromSource(ConstantSource)} so that
+	 * a runtime classpath lacking {@code net.runelite.api.AnimationID} degrades this
+	 * classifier to all-{@link #UNKNOWN} with one warning, instead of throwing a
+	 * {@link NoClassDefFoundError} out of this constructor. That matters because this map is
+	 * built eagerly inside {@link ActivityClassificationCollector}'s Guice
+	 * {@code @Singleton @Inject} constructor: an unhandled error here becomes a Guice
+	 * {@code CreationException} that fails the ENTIRE plugin (no panel, no telemetry, no
+	 * capture). A stripped runtime api jar omits the constant-holder classes because javac
+	 * inlines their {@code static final int} constants for normal plugins, so this class is
+	 * absent exactly when the plugin is loaded against that jar.
+	 */
 	public AnimationActivityMap()
 	{
-		this(reflectAnimationConstants());
+		this.idToBucket = buildFromSource(AnimationActivityMap::reflectAnimationConstants);
 	}
 
 	/**
@@ -132,6 +146,18 @@ public final class AnimationActivityMap
 	AnimationActivityMap(Map<String, Integer> constants)
 	{
 		this.idToBucket = build(constants);
+	}
+
+	/**
+	 * Degradation-testable seam: build through an injected {@link ConstantSource}. A test
+	 * can pass a source that throws {@link NoClassDefFoundError} to prove construction still
+	 * succeeds and the map degrades to all-{@link #UNKNOWN}, without needing a stripped jar
+	 * on the test classpath. Production wiring stays zero-config (the no-arg constructor
+	 * binds {@link #reflectAnimationConstants()}). Package-private.
+	 */
+	AnimationActivityMap(ConstantSource source)
+	{
+		this.idToBucket = buildFromSource(source);
 	}
 
 	/**
@@ -265,6 +291,41 @@ public final class AnimationActivityMap
 	}
 
 	/**
+	 * Load the raw constants through {@code source}, then {@link #build(Map)} the
+	 * {@code id -> bucket} map. If the source cannot resolve {@link AnimationID} at runtime
+	 * it throws a {@link LinkageError} ({@link NoClassDefFoundError} for a stripped api jar);
+	 * that is caught HERE and turned into honest degradation:
+	 * <ul>
+	 *   <li>construction still succeeds — the caller (and the whole plugin) survives;</li>
+	 *   <li>an empty map is returned, so {@link #classify(int)} yields {@link #UNKNOWN} for
+	 *       every animation id;</li>
+	 *   <li>the gameval gap-fills are deliberately NOT applied on this path — with the legacy
+	 *       constants unreadable, emitting 791/881 would be a partial guess, exactly what the
+	 *       honesty contract forbids (contrast the {@code (Map)} constructor, where an empty
+	 *       source means "read successfully, nothing matched" and the gap-fills DO apply);</li>
+	 *   <li>exactly one {@code warn} is logged, naming the missing class and the consequence.</li>
+	 * </ul>
+	 * Only the load is guarded: a {@link LinkageError} from anywhere else (or a real bug in
+	 * {@link #build(Map)}) still surfaces rather than being silently swallowed.
+	 */
+	private static Map<Integer, String> buildFromSource(ConstantSource source)
+	{
+		Map<String, Integer> constants;
+		try
+		{
+			constants = source.load();
+		}
+		catch (LinkageError err)
+		{
+			log.warn("activity classification degraded to unknown — runtime classpath lacks "
+				+ "net/runelite/api/AnimationID; every animation id classifies as '{}' ({})",
+				UNKNOWN, err.toString());
+			return Collections.emptyMap();
+		}
+		return build(constants);
+	}
+
+	/**
 	 * Build the {@code id -> bucket} map from a {@code name -> value} constant source.
 	 * Poisons the two known-ambiguous ids up front, poisons any further id that two
 	 * families both claim, then applies the gameval gap-fills put-if-absent. A poisoned
@@ -336,5 +397,19 @@ public final class AnimationActivityMap
 			}
 		}
 		return constants;
+	}
+
+	/**
+	 * Seam for the constant-loading step (research recommendation X.1's reflection).
+	 * Production binds {@link AnimationActivityMap#reflectAnimationConstants()}; a test binds
+	 * a source that throws {@link NoClassDefFoundError} to exercise the honest-degradation
+	 * path. Implementations may throw a {@link LinkageError} when {@link AnimationID} is
+	 * absent at runtime — {@link AnimationActivityMap#buildFromSource(ConstantSource)} is the
+	 * single place that turns that into all-{@code unknown}.
+	 */
+	@FunctionalInterface
+	interface ConstantSource
+	{
+		Map<String, Integer> load();
 	}
 }

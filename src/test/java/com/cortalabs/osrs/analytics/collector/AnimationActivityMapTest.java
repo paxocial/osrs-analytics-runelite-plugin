@@ -4,9 +4,17 @@
  */
 package com.cortalabs.osrs.analytics.collector;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import org.junit.After;
 import org.junit.Test;
+import org.slf4j.LoggerFactory;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -39,6 +47,54 @@ public class AnimationActivityMapTest
 			m.put((String) namePairs[i], (Integer) namePairs[i + 1]);
 		}
 		return m;
+	}
+
+	// --- Log capture for the honest-degradation warn (logback ListAppender) ---
+
+	private Logger animLogger;
+	private ListAppender<ILoggingEvent> appender;
+	private Level priorLevel;
+
+	/**
+	 * Attach a capturing appender to the {@link AnimationActivityMap} logger. Forces the
+	 * logger to DEBUG (restored in {@link #detachAppender()}) so the assertion on WARN count
+	 * does not depend on ambient logback configuration.
+	 */
+	private ListAppender<ILoggingEvent> captureAnimationMapLogs()
+	{
+		animLogger = (Logger) LoggerFactory.getLogger(AnimationActivityMap.class);
+		priorLevel = animLogger.getLevel();
+		animLogger.setLevel(Level.DEBUG);
+		appender = new ListAppender<>();
+		appender.start();
+		animLogger.addAppender(appender);
+		return appender;
+	}
+
+	@After
+	public void detachAppender()
+	{
+		if (animLogger != null)
+		{
+			if (appender != null)
+			{
+				animLogger.detachAppender(appender);
+			}
+			animLogger.setLevel(priorLevel);
+		}
+	}
+
+	private static List<ILoggingEvent> warnEvents(ListAppender<ILoggingEvent> appender)
+	{
+		List<ILoggingEvent> warns = new ArrayList<>();
+		for (ILoggingEvent event : appender.list)
+		{
+			if (event.getLevel() == Level.WARN)
+			{
+				warns.add(event);
+			}
+		}
+		return warns;
 	}
 
 	// --- Controlled-source bucketing (plain data, no jar dependency) ---
@@ -173,5 +229,95 @@ public class AnimationActivityMapTest
 		// reflection path actually read the constants rather than returning an empty map.
 		assertTrue("reflection should map many animation ids",
 			new AnimationActivityMap().mappedIdCount() > 100);
+	}
+
+	// --- Honest degradation when the AnimationID constant class is unloadable ---
+	// Reproduces the in-client failure: a stripped runtime api jar omits
+	// net.runelite.api.AnimationID (javac inlines its constants for normal plugins), so the
+	// reflection source throws NoClassDefFoundError. This must NOT propagate — an optional
+	// enrichment cannot take down the plugin's Guice singleton graph.
+
+	@Test
+	public void degradesToAllUnknownWithExactlyOneWarnWhenConstantClassUnloadable()
+	{
+		ListAppender<ILoggingEvent> logs = captureAnimationMapLogs();
+
+		// The injected source stands in for reflectAnimationConstants() against a classpath
+		// with no AnimationID: it throws exactly what the JVM would throw there.
+		AnimationActivityMap map = new AnimationActivityMap(
+			() ->
+			{
+				throw new NoClassDefFoundError("net/runelite/api/AnimationID");
+			});
+
+		// 1) Construction SUCCEEDED — the whole-plugin death is gone (unfixed code throws here).
+		// 2) Every real animation id degrades to the honest unknown bucket.
+		for (int id = 0; id <= 20_000; id++)
+		{
+			assertEquals("degraded map must classify id " + id + " as unknown",
+				AnimationActivityMap.UNKNOWN, map.classify(id));
+		}
+		// The gameval gap-fills must NOT leak through on the degraded path: with the legacy
+		// constants unreadable, emitting 791/881 would be a partial guess.
+		assertEquals("no gap-fill guessing when constants are unreadable",
+			AnimationActivityMap.UNKNOWN, map.classify(791));
+		assertEquals("no gap-fill guessing when constants are unreadable",
+			AnimationActivityMap.UNKNOWN, map.classify(881));
+		assertEquals("nothing is concretely mapped when the constants cannot be read",
+			0, map.mappedIdCount());
+
+		// 3) Exactly one warn, naming the missing class and the degradation consequence.
+		List<ILoggingEvent> warns = warnEvents(logs);
+		assertEquals("degradation must emit exactly one warn", 1, warns.size());
+		String message = warns.get(0).getFormattedMessage();
+		assertTrue("warn must name the missing class: " + message,
+			message.contains("net/runelite/api/AnimationID"));
+		assertTrue("warn must name the degradation consequence: " + message,
+			message.contains("degraded to unknown"));
+	}
+
+	@Test
+	public void degradedModePreservesIdleSentinelAndClosedVocabulary()
+	{
+		AnimationActivityMap map = new AnimationActivityMap(
+			() ->
+			{
+				throw new NoClassDefFoundError("net/runelite/api/AnimationID");
+			});
+
+		// The idle sentinel (-1) is the ABSENCE of an animation, not a classification that
+		// ever depended on AnimationID — it stays idle even when the constants are unreadable.
+		assertEquals("empty animation is still idle in degraded mode",
+			AnimationActivityMap.IDLE, map.classify(-1));
+		// The animation-alone-ambiguous ids stay unknown (here: because nothing is mapped).
+		assertEquals(AnimationActivityMap.UNKNOWN, map.classify(827));
+		assertEquals(AnimationActivityMap.UNKNOWN, map.classify(830));
+		// The closed-vocabulary guarantee holds in degraded mode exactly as in normal mode.
+		for (int id = -1; id <= 5_000; id++)
+		{
+			assertTrue("classify(" + id + ") escaped the closed taxonomy in degraded mode",
+				AnimationActivityMap.BUCKETS.contains(map.classify(id)));
+		}
+	}
+
+	@Test
+	public void healthySourceBuildsThroughSeamWithGapFillsAndNoWarn()
+	{
+		ListAppender<ILoggingEvent> logs = captureAnimationMapLogs();
+
+		// A source that returns real constants (what reflectAnimationConstants() does when
+		// AnimationID IS present) builds normally through the same seam: families map, the
+		// gameval gap-fills DO apply (a successful read makes them valid supplements), and
+		// nothing warns — degradation is the ONLY warn path.
+		AnimationActivityMap map = new AnimationActivityMap(
+			() -> constants("WOODCUTTING_BRONZE", 879, "FISHING_NET", 621));
+
+		assertEquals(AnimationActivityMap.WOODCUTTING, map.classify(879));
+		assertEquals(AnimationActivityMap.FISHING, map.classify(621));
+		assertEquals("gap-fills apply on a successful read",
+			AnimationActivityMap.RUNECRAFT, map.classify(791));
+		assertEquals("gap-fills apply on a successful read",
+			AnimationActivityMap.THIEVING, map.classify(881));
+		assertTrue("a healthy build must not warn", warnEvents(logs).isEmpty());
 	}
 }
