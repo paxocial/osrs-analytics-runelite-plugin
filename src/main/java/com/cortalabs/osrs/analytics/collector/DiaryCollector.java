@@ -168,7 +168,18 @@ public class DiaryCollector
 	 */
 	private boolean isComplete(int varbitId)
 	{
-		int threshold = THREE_STATE_VARBITS.contains(varbitId) ? 2 : 1;
-		return client.getVarbitValue(varbitId) >= threshold;
+		return client.getVarbitValue(varbitId) >= completionThreshold(varbitId);
+	}
+
+	/**
+	 * The varbit value at which a tier counts as complete: {@code 2} for the 3-state
+	 * Karamja task varbits ({@code ATJUN_*_DONE}: 0 none, 1 tasks done, 2 reward
+	 * claimed), {@code 1} for every standard completion flag. Package-private so the
+	 * panel's at-a-glance tier count reads through this same source-verified rule
+	 * instead of duplicating the Karamja special case.
+	 */
+	static int completionThreshold(int varbitId)
+	{
+		return THREE_STATE_VARBITS.contains(varbitId) ? 2 : 1;
 	}
 }

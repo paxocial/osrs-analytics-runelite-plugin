@@ -12,6 +12,7 @@ import com.cortalabs.osrs.analytics.collector.DiaryCollector;
 import com.cortalabs.osrs.analytics.collector.EquipmentCollector;
 import com.cortalabs.osrs.analytics.collector.LootCollector;
 import com.cortalabs.osrs.analytics.collector.NameChangeCollector;
+import com.cortalabs.osrs.analytics.collector.PanelStateTracker;
 import com.cortalabs.osrs.analytics.collector.QuestCollector;
 import com.cortalabs.osrs.analytics.collector.SessionCollector;
 import com.cortalabs.osrs.analytics.collector.XpCollector;
@@ -129,6 +130,9 @@ public class AnalyticsPlugin extends Plugin
 	@Inject
 	private NameChangeCollector nameChangeCollector;
 
+	@Inject
+	private PanelStateTracker panelStateTracker;
+
 	private List<Object> collectors;
 	private int currentFlushInterval;
 	private AnalyticsPanel panel;
@@ -148,10 +152,12 @@ public class AnalyticsPlugin extends Plugin
 			activityCollector,
 			collectionLogCollector,
 			bankCollector,
-			nameChangeCollector);
+			nameChangeCollector,
+			panelStateTracker);
 
 		reconfigure();
 		analyticsClient.setNotifier(this::notifyPlayer);
+		panelStateTracker.reset();
 		for (Object collector : collectors)
 		{
 			eventBus.register(collector);
@@ -159,7 +165,9 @@ public class AnalyticsPlugin extends Plugin
 		currentFlushInterval = config.flushIntervalSeconds();
 		analyticsClient.start(currentFlushInterval);
 
-		panel = new AnalyticsPanel(analyticsClient, lookupClient);
+		panel = new AnalyticsPanel(analyticsClient, lookupClient, panelStateTracker);
+		// The tracker witnesses on the client thread; hop its change signal onto the EDT.
+		panelStateTracker.setChangeListener(() -> SwingUtilities.invokeLater(panel::refresh));
 		navButton = NavigationButton.builder()
 			.tooltip("Catherby Analytics")
 			.icon(buildIcon())
@@ -181,6 +189,7 @@ public class AnalyticsPlugin extends Plugin
 	protected void shutDown()
 	{
 		menuManager.removePlayerMenuItem(LOOKUP);
+		panelStateTracker.setChangeListener(null);
 		if (panel != null)
 		{
 			panel.stop();
