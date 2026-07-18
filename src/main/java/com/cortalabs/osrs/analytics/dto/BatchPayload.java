@@ -40,4 +40,12 @@ public class BatchPayload extends PluginPayload
 	public List<ActivityUpdate> activity;
 
 	public List<BankSnapshot> bank;
+
+	@SerializedName("region_time")
+	public List<RegionTimeShare> regionTime;
+
+	public List<EfficiencyEnvelope> efficiency;
+
+	@SerializedName("activity_time")
+	public List<ActivityBreakdown> activityTime;
 }

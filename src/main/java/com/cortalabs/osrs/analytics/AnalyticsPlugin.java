@@ -4,16 +4,19 @@
  */
 package com.cortalabs.osrs.analytics;
 
+import com.cortalabs.osrs.analytics.collector.ActivityClassificationCollector;
 import com.cortalabs.osrs.analytics.collector.ActivityCollector;
 import com.cortalabs.osrs.analytics.collector.BankCollector;
 import com.cortalabs.osrs.analytics.collector.CollectionLogCollector;
 import com.cortalabs.osrs.analytics.collector.CombatAchievementCollector;
 import com.cortalabs.osrs.analytics.collector.DiaryCollector;
+import com.cortalabs.osrs.analytics.collector.EfficiencyCollector;
 import com.cortalabs.osrs.analytics.collector.EquipmentCollector;
 import com.cortalabs.osrs.analytics.collector.LootCollector;
 import com.cortalabs.osrs.analytics.collector.NameChangeCollector;
 import com.cortalabs.osrs.analytics.collector.PanelStateTracker;
 import com.cortalabs.osrs.analytics.collector.QuestCollector;
+import com.cortalabs.osrs.analytics.collector.RegionTimeShareCollector;
 import com.cortalabs.osrs.analytics.collector.SessionCollector;
 import com.cortalabs.osrs.analytics.collector.XpCollector;
 import com.cortalabs.osrs.analytics.transport.AnalyticsClient;
@@ -122,6 +125,15 @@ public class AnalyticsPlugin extends Plugin
 	private ActivityCollector activityCollector;
 
 	@Inject
+	private RegionTimeShareCollector regionTimeShareCollector;
+
+	@Inject
+	private EfficiencyCollector efficiencyCollector;
+
+	@Inject
+	private ActivityClassificationCollector activityClassificationCollector;
+
+	@Inject
 	private CollectionLogCollector collectionLogCollector;
 
 	@Inject
@@ -150,6 +162,9 @@ public class AnalyticsPlugin extends Plugin
 			equipmentCollector,
 			lootCollector,
 			activityCollector,
+			regionTimeShareCollector,
+			efficiencyCollector,
+			activityClassificationCollector,
 			collectionLogCollector,
 			bankCollector,
 			nameChangeCollector,

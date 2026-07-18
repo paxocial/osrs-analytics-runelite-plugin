@@ -467,4 +467,134 @@ public class DtoSerializationTest
 		assertFalse(o.has("loot"));
 		assertFalse(o.has("bank"));
 	}
+
+	// --- FP-A4 Wave-A aggregate lanes (region time-share, efficiency, activity) ---
+
+	@Test
+	public void regionTimeShareUsesContractFields()
+	{
+		RegionTimeShare region = new RegionTimeShare();
+		region.rsn = "Zezima";
+		region.pluginVersion = "1.0.0";
+		region.sessionId = "sid-1";
+		region.regions = Arrays.asList(
+			new RegionTimeShare.RegionTick(12850, 100),
+			new RegionTimeShare.RegionTick(12851, 40));
+
+		JsonObject o = json(region);
+		assertEquals("Zezima", o.get("rsn").getAsString());
+		assertEquals("1.0.0", o.get("plugin_version").getAsString());
+		assertEquals("sid-1", o.get("session_id").getAsString());
+		JsonArray regions = o.getAsJsonArray("regions");
+		assertEquals(2, regions.size());
+		JsonObject first = regions.get(0).getAsJsonObject();
+		assertEquals(12850, first.get("region_id").getAsInt());
+		assertEquals(100, first.get("ticks").getAsInt());
+		// nested RegionTick must NOT carry base payload fields (extra=forbid).
+		assertFalse("nested region tick must not carry rsn", first.has("rsn"));
+	}
+
+	@Test
+	public void efficiencyEnvelopeUsesContractFields()
+	{
+		EfficiencyEnvelope eff = new EfficiencyEnvelope();
+		eff.rsn = "Zezima";
+		eff.pluginVersion = "1.0.0";
+		eff.sessionId = "sid-2";
+		eff.activeTicks = 300;
+		eff.idleTicks = 12;
+		eff.worldHops = 2;
+		eff.durationTicks = 312;
+		eff.skillRates = Arrays.asList(new EfficiencyEnvelope.SkillRate("woodcutting", 45000));
+
+		JsonObject o = json(eff);
+		assertEquals("sid-2", o.get("session_id").getAsString());
+		assertEquals(300, o.get("active_ticks").getAsInt());
+		assertEquals(12, o.get("idle_ticks").getAsInt());
+		assertEquals(2, o.get("world_hops").getAsInt());
+		assertEquals(312, o.get("duration_ticks").getAsInt());
+		JsonArray rates = o.getAsJsonArray("skill_rates");
+		assertEquals(1, rates.size());
+		JsonObject rate = rates.get(0).getAsJsonObject();
+		assertEquals("woodcutting", rate.get("skill").getAsString());
+		assertEquals(45000, rate.get("xp_per_hour").getAsInt());
+	}
+
+	@Test
+	public void efficiencyOmitsNullSkillRates()
+	{
+		// v1 leaves skill_rates null: it must be ABSENT (not [] and not null), matching the
+		// pydantic Optional[...] = None default. An empty list would misrepresent "measured zero".
+		EfficiencyEnvelope eff = new EfficiencyEnvelope();
+		eff.rsn = "Zezima";
+		eff.pluginVersion = "1.0.0";
+		eff.sessionId = "sid-3";
+		eff.activeTicks = 100;
+		eff.idleTicks = 0;
+		eff.worldHops = 0;
+		eff.durationTicks = 100;
+		eff.skillRates = null;
+
+		JsonObject o = json(eff);
+		assertFalse("null skill_rates must be omitted from the wire", o.has("skill_rates"));
+		// A real zero (0 idle/hops in a captured session) is still present, distinct from absence.
+		assertEquals(0, o.get("idle_ticks").getAsInt());
+		assertEquals(0, o.get("world_hops").getAsInt());
+	}
+
+	@Test
+	public void activityBreakdownUsesContractFields()
+	{
+		ActivityBreakdown activity = new ActivityBreakdown();
+		activity.rsn = "Zezima";
+		activity.pluginVersion = "1.0.0";
+		activity.sessionId = "sid-4";
+		activity.buckets = Arrays.asList(
+			new ActivityBreakdown.ActivityBucket("woodcutting", 3600),
+			new ActivityBreakdown.ActivityBucket("unknown", 120));
+
+		JsonObject o = json(activity);
+		assertEquals("sid-4", o.get("session_id").getAsString());
+		JsonArray buckets = o.getAsJsonArray("buckets");
+		assertEquals(2, buckets.size());
+		JsonObject first = buckets.get(0).getAsJsonObject();
+		assertEquals("woodcutting", first.get("bucket").getAsString());
+		assertEquals(3600, first.get("seconds").getAsInt());
+		assertFalse("nested activity bucket must not carry rsn", first.has("rsn"));
+	}
+
+	@Test
+	public void batchCarriesWaveAAggregateLists()
+	{
+		BatchPayload batch = new BatchPayload();
+		batch.rsn = "Zezima";
+		batch.pluginVersion = "1.0.0";
+
+		RegionTimeShare region = new RegionTimeShare();
+		region.rsn = "Zezima";
+		region.pluginVersion = "1.0.0";
+		region.sessionId = "sid-1";
+		region.regions = Arrays.asList(new RegionTimeShare.RegionTick(12850, 10));
+		batch.regionTime = Arrays.asList(region);
+
+		EfficiencyEnvelope eff = new EfficiencyEnvelope();
+		eff.rsn = "Zezima";
+		eff.pluginVersion = "1.0.0";
+		eff.sessionId = "sid-2";
+		batch.efficiency = Arrays.asList(eff);
+
+		ActivityBreakdown activity = new ActivityBreakdown();
+		activity.rsn = "Zezima";
+		activity.pluginVersion = "1.0.0";
+		activity.sessionId = "sid-4";
+		activity.buckets = Arrays.asList(new ActivityBreakdown.ActivityBucket("idle", 60));
+		batch.activityTime = Arrays.asList(activity);
+
+		JsonObject o = json(batch);
+		assertTrue("batch must use region_time", o.has("region_time"));
+		assertTrue("batch must use efficiency", o.has("efficiency"));
+		assertTrue("batch must use activity_time", o.has("activity_time"));
+		assertEquals(1, o.getAsJsonArray("region_time").size());
+		assertEquals(1, o.getAsJsonArray("activity_time").size());
+	}
 }

@@ -166,6 +166,24 @@ public interface AnalyticsConfig extends Config
 		return true;
 	}
 
+	@ConfigItem(keyName = "trackRegionTimeShare", name = "Region time-share", description = "Per-session ticks spent in each map region, aggregated and sent once at session end.", section = categoriesSection, position = 8)
+	default boolean trackRegionTimeShare()
+	{
+		return true;
+	}
+
+	@ConfigItem(keyName = "trackEfficiency", name = "Efficiency (active/idle)", description = "Per-session active vs idle time, world hops and duration, aggregated and sent once at session end.", section = categoriesSection, position = 9)
+	default boolean trackEfficiency()
+	{
+		return true;
+	}
+
+	@ConfigItem(keyName = "trackActivityClassification", name = "Activity classification", description = "Per-session time by activity (woodcutting, mining, ...), classified from animations, aggregated and sent once at session end.", section = categoriesSection, position = 10)
+	default boolean trackActivityClassification()
+	{
+		return true;
+	}
+
 	// --- Private data (off by default) ---
 
 	@ConfigItem(

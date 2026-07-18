@@ -4,6 +4,7 @@
  */
 package com.cortalabs.osrs.analytics.transport;
 
+import com.cortalabs.osrs.analytics.dto.ActivityBreakdown;
 import com.cortalabs.osrs.analytics.dto.ActivityUpdate;
 import com.cortalabs.osrs.analytics.dto.BankSnapshot;
 import com.cortalabs.osrs.analytics.dto.BatchPayload;
@@ -11,10 +12,12 @@ import com.cortalabs.osrs.analytics.dto.CollectionLogEntry;
 import com.cortalabs.osrs.analytics.dto.CollectionPageSummary;
 import com.cortalabs.osrs.analytics.dto.CombatAchievementProgress;
 import com.cortalabs.osrs.analytics.dto.DiaryProgress;
+import com.cortalabs.osrs.analytics.dto.EfficiencyEnvelope;
 import com.cortalabs.osrs.analytics.dto.EquipmentState;
 import com.cortalabs.osrs.analytics.dto.LootDrop;
 import com.cortalabs.osrs.analytics.dto.PluginPayload;
 import com.cortalabs.osrs.analytics.dto.QuestStatus;
+import com.cortalabs.osrs.analytics.dto.RegionTimeShare;
 import com.cortalabs.osrs.analytics.dto.SessionEvent;
 import com.cortalabs.osrs.analytics.dto.XpSnapshot;
 import com.google.gson.Gson;
@@ -484,6 +487,15 @@ public class AnalyticsClient
 					break;
 				case BANK:
 					batch.bank = add(batch.bank, (BankSnapshot) p);
+					break;
+				case REGION_TIME:
+					batch.regionTime = add(batch.regionTime, (RegionTimeShare) p);
+					break;
+				case EFFICIENCY:
+					batch.efficiency = add(batch.efficiency, (EfficiencyEnvelope) p);
+					break;
+				case ACTIVITY_TIME:
+					batch.activityTime = add(batch.activityTime, (ActivityBreakdown) p);
 					break;
 				default:
 					break;

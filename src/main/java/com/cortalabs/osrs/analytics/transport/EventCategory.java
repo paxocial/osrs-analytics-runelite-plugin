@@ -21,8 +21,12 @@ public enum EventCategory
 	LOOT,
 	ACTIVITY,
 	BANK,
-	// Appended last on purpose: the status panel and AnalyticsClient index
-	// accepted-event counts by ordinal(), so new categories must not shift the
-	// existing ordinals.
-	COLLECTION_PAGE
+	// Appended on purpose: the status panel and AnalyticsClient index accepted-event
+	// counts by ordinal(), so new categories must be added at the END and existing
+	// ordinals must never shift.
+	COLLECTION_PAGE,
+	// Wave-A Full Picture aggregate lanes (FP-A4), appended after COLLECTION_PAGE.
+	REGION_TIME,
+	EFFICIENCY,
+	ACTIVITY_TIME
 }
