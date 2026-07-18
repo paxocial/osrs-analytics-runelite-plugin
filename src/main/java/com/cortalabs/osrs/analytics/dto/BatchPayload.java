@@ -48,4 +48,10 @@ public class BatchPayload extends PluginPayload
 
 	@SerializedName("activity_time")
 	public List<ActivityBreakdown> activityTime;
+
+	@SerializedName("signal_events")
+	public List<SignalEvent> signalEvents;
+
+	@SerializedName("ge_trades")
+	public List<GeTrade> geTrades;
 }

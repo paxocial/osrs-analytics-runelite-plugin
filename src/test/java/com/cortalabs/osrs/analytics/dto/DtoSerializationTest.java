@@ -15,6 +15,7 @@ import java.util.Map;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -596,5 +597,150 @@ public class DtoSerializationTest
 		assertTrue("batch must use activity_time", o.has("activity_time"));
 		assertEquals(1, o.getAsJsonArray("region_time").size());
 		assertEquals(1, o.getAsJsonArray("activity_time").size());
+	}
+
+	// --- FP-A5 Wave-A discrete-event lanes (signal events, GE trades) ---
+
+	@Test
+	public void signalEventUsesContractFields()
+	{
+		SignalEvent signal = new SignalEvent();
+		signal.rsn = "Zezima";
+		signal.pluginVersion = "1.0.0";
+		signal.signalType = SignalEvent.SignalType.BOSS_KC;
+		signal.subject = "Zulrah";
+		signal.value = 1412;
+		signal.detail = "Your Zulrah kill count is: 1,412";
+
+		JsonObject o = json(signal);
+		assertEquals("boss_kc", o.get("signal_type").getAsString());
+		assertEquals("Zulrah", o.get("subject").getAsString());
+		assertEquals(1412, o.get("value").getAsInt());
+		assertEquals("Your Zulrah kill count is: 1,412", o.get("detail").getAsString());
+	}
+
+	@Test
+	public void signalEventOmitsNullOptionalFields()
+	{
+		// A pet drop carries no subject/value/detail beyond the kind: each null must be ABSENT
+		// (not null, not 0), matching the pydantic Optional[...] = None "honestly absent" contract.
+		SignalEvent signal = new SignalEvent();
+		signal.rsn = "Zezima";
+		signal.pluginVersion = "1.0.0";
+		signal.signalType = SignalEvent.SignalType.PET;
+		signal.subject = null;
+		signal.value = null;
+		signal.detail = null;
+
+		JsonObject o = json(signal);
+		assertEquals("pet", o.get("signal_type").getAsString());
+		assertFalse("null subject must be absent", o.has("subject"));
+		assertFalse("null value must be absent, never 0", o.has("value"));
+		assertFalse("null detail must be absent", o.has("detail"));
+	}
+
+	@Test
+	public void signalTypeEnumValuesMatchContract()
+	{
+		// These six strings are the wire contract shared with the pydantic SignalType enum in
+		// catherby src/catherby/api/schemas/plugin.py; drifting either side reclassifies rows.
+		assertEquals("\"level_up\"", GSON.toJson(SignalEvent.SignalType.LEVEL_UP));
+		assertEquals("\"pet\"", GSON.toJson(SignalEvent.SignalType.PET));
+		assertEquals("\"clue_completion\"", GSON.toJson(SignalEvent.SignalType.CLUE_COMPLETION));
+		assertEquals("\"boss_kc\"", GSON.toJson(SignalEvent.SignalType.BOSS_KC));
+		assertEquals("\"diary_completion\"", GSON.toJson(SignalEvent.SignalType.DIARY_COMPLETION));
+		assertEquals("\"quest_completion\"", GSON.toJson(SignalEvent.SignalType.QUEST_COMPLETION));
+	}
+
+	@Test
+	public void signalEventDetailClampsToTheFiveHundredCharContract()
+	{
+		StringBuilder overlong = new StringBuilder();
+		for (int i = 0; i < 600; i++)
+		{
+			overlong.append('x');
+		}
+		String clamped = SignalEvent.clampDetail(overlong.toString());
+		assertEquals("detail must clamp to the server's 500-char max", 500, clamped.length());
+		assertNull("null detail stays null (absent on the wire)", SignalEvent.clampDetail(null));
+	}
+
+	@Test
+	public void geTradeUsesContractFields()
+	{
+		GeTrade trade = new GeTrade();
+		trade.rsn = "Zezima";
+		trade.pluginVersion = "1.0.0";
+		trade.itemId = 4151;
+		trade.state = GeTrade.GeTradeState.BOUGHT;
+		trade.quantity = 100;
+		trade.spent = 5_000_000_000L; // exceeds 32-bit range -> BIGINT / long on the wire
+		trade.priceEach = 50_000_000;
+		trade.slot = 3;
+
+		JsonObject o = json(trade);
+		assertEquals(4151, o.get("item_id").getAsInt());
+		assertEquals("bought", o.get("state").getAsString());
+		assertEquals(100, o.get("quantity").getAsInt());
+		assertEquals(5_000_000_000L, o.get("spent").getAsLong());
+		assertEquals(50_000_000, o.get("price_each").getAsInt());
+		assertEquals(3, o.get("slot").getAsInt());
+	}
+
+	@Test
+	public void geTradeOmitsNullOptionalFields()
+	{
+		GeTrade trade = new GeTrade();
+		trade.rsn = "Zezima";
+		trade.pluginVersion = "1.0.0";
+		trade.itemId = 995;
+		trade.state = GeTrade.GeTradeState.SOLD;
+		trade.quantity = 1;
+		trade.spent = 100L;
+		trade.priceEach = null;
+		trade.slot = null;
+
+		JsonObject o = json(trade);
+		assertEquals("sold", o.get("state").getAsString());
+		assertFalse("null price_each must be absent", o.has("price_each"));
+		assertFalse("null slot must be absent", o.has("slot"));
+	}
+
+	@Test
+	public void geTradeStateEnumValuesMatchContract()
+	{
+		assertEquals("\"bought\"", GSON.toJson(GeTrade.GeTradeState.BOUGHT));
+		assertEquals("\"sold\"", GSON.toJson(GeTrade.GeTradeState.SOLD));
+	}
+
+	@Test
+	public void batchCarriesSignalEventAndGeTradeLists()
+	{
+		BatchPayload batch = new BatchPayload();
+		batch.rsn = "Zezima";
+		batch.pluginVersion = "1.0.0";
+
+		SignalEvent signal = new SignalEvent();
+		signal.rsn = "Zezima";
+		signal.pluginVersion = "1.0.0";
+		signal.signalType = SignalEvent.SignalType.LEVEL_UP;
+		signal.subject = "Cooking";
+		signal.value = 43;
+		batch.signalEvents = Arrays.asList(signal);
+
+		GeTrade trade = new GeTrade();
+		trade.rsn = "Zezima";
+		trade.pluginVersion = "1.0.0";
+		trade.itemId = 4151;
+		trade.state = GeTrade.GeTradeState.BOUGHT;
+		trade.quantity = 1;
+		trade.spent = 1L;
+		batch.geTrades = Arrays.asList(trade);
+
+		JsonObject o = json(batch);
+		assertTrue("batch must use signal_events", o.has("signal_events"));
+		assertTrue("batch must use ge_trades", o.has("ge_trades"));
+		assertEquals(1, o.getAsJsonArray("signal_events").size());
+		assertEquals(1, o.getAsJsonArray("ge_trades").size());
 	}
 }

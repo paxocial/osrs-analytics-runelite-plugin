@@ -28,5 +28,8 @@ public enum EventCategory
 	// Wave-A Full Picture aggregate lanes (FP-A4), appended after COLLECTION_PAGE.
 	REGION_TIME,
 	EFFICIENCY,
-	ACTIVITY_TIME
+	ACTIVITY_TIME,
+	// Wave-A Full Picture discrete-event lanes (FP-A5), appended after ACTIVITY_TIME.
+	SIGNAL_EVENT,
+	GE_TRADE
 }

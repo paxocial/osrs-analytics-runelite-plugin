@@ -12,12 +12,14 @@ import com.cortalabs.osrs.analytics.collector.CombatAchievementCollector;
 import com.cortalabs.osrs.analytics.collector.DiaryCollector;
 import com.cortalabs.osrs.analytics.collector.EfficiencyCollector;
 import com.cortalabs.osrs.analytics.collector.EquipmentCollector;
+import com.cortalabs.osrs.analytics.collector.GeTradeCollector;
 import com.cortalabs.osrs.analytics.collector.LootCollector;
 import com.cortalabs.osrs.analytics.collector.NameChangeCollector;
 import com.cortalabs.osrs.analytics.collector.PanelStateTracker;
 import com.cortalabs.osrs.analytics.collector.QuestCollector;
 import com.cortalabs.osrs.analytics.collector.RegionTimeShareCollector;
 import com.cortalabs.osrs.analytics.collector.SessionCollector;
+import com.cortalabs.osrs.analytics.collector.SignalEventCollector;
 import com.cortalabs.osrs.analytics.collector.XpCollector;
 import com.cortalabs.osrs.analytics.transport.AnalyticsClient;
 import com.cortalabs.osrs.analytics.transport.LookupClient;
@@ -134,6 +136,12 @@ public class AnalyticsPlugin extends Plugin
 	private ActivityClassificationCollector activityClassificationCollector;
 
 	@Inject
+	private SignalEventCollector signalEventCollector;
+
+	@Inject
+	private GeTradeCollector geTradeCollector;
+
+	@Inject
 	private CollectionLogCollector collectionLogCollector;
 
 	@Inject
@@ -165,6 +173,8 @@ public class AnalyticsPlugin extends Plugin
 			regionTimeShareCollector,
 			efficiencyCollector,
 			activityClassificationCollector,
+			signalEventCollector,
+			geTradeCollector,
 			collectionLogCollector,
 			bankCollector,
 			nameChangeCollector,

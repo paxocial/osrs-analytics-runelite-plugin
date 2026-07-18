@@ -184,6 +184,18 @@ public interface AnalyticsConfig extends Config
 		return true;
 	}
 
+	@ConfigItem(keyName = "trackSignalEvents", name = "Signal events", description = "Discrete milestone signals witnessed from chat: level-ups, pets, clue completions, per-kill boss KC, diary completions.", section = categoriesSection, position = 11)
+	default boolean trackSignalEvents()
+	{
+		return true;
+	}
+
+	@ConfigItem(keyName = "trackGeTrades", name = "GE trades", description = "Completed Grand Exchange trades (what you bought/sold, when, for how much).", section = categoriesSection, position = 12)
+	default boolean trackGeTrades()
+	{
+		return true;
+	}
+
 	// --- Private data (off by default) ---
 
 	@ConfigItem(
