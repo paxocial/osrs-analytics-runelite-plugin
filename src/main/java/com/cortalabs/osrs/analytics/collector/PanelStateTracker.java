@@ -101,6 +101,12 @@ public class PanelStateTracker
 		return ledger.skillsAdvanced();
 	}
 
+	/** Per-skill session XP breakdown, largest first (read on the EDT). */
+	public java.util.List<SessionLedger.SkillGain> gains()
+	{
+		return ledger.gains();
+	}
+
 	@Subscribe
 	public void onStatChanged(StatChanged event)
 	{

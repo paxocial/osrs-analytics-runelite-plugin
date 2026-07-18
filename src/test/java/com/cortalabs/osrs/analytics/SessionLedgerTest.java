@@ -4,8 +4,11 @@
  */
 package com.cortalabs.osrs.analytics;
 
+import com.cortalabs.osrs.analytics.SessionLedger.SkillGain;
+import java.util.List;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Guards the session XP ledger's one job: report only XP it actually witnessed climb.
@@ -110,5 +113,36 @@ public class SessionLedgerTest
 		ledger.observe(null, 1234L);
 		assertEquals(0L, ledger.xpGained());
 		assertEquals(0, ledger.skillsAdvanced());
+	}
+
+	// ------------------------------------------------------------------
+	// Per-skill breakdown — witnessed climbs only, largest first.
+	// ------------------------------------------------------------------
+
+	@Test
+	public void gainsListsOnlyClimbedSkillsLargestFirst()
+	{
+		SessionLedger ledger = new SessionLedger();
+		ledger.observe("attack", 1000L);   // baselines
+		ledger.observe("magic", 2000L);
+		ledger.observe("mining", 500L);
+		ledger.observe("attack", 1500L);   // +500
+		ledger.observe("magic", 2100L);    // +100
+		// mining never climbs — it must not appear as +0.
+
+		List<SkillGain> gains = ledger.gains();
+		assertEquals("only skills that climbed appear", 2, gains.size());
+		assertEquals("largest gain first", "attack", gains.get(0).skill);
+		assertEquals(500L, gains.get(0).gained);
+		assertEquals("magic", gains.get(1).skill);
+		assertEquals(100L, gains.get(1).gained);
+	}
+
+	@Test
+	public void gainsIsEmptyWhenNothingHasClimbed()
+	{
+		SessionLedger ledger = new SessionLedger();
+		ledger.observe("attack", 1000L); // baseline only
+		assertTrue("a skill sitting at its baseline is never listed as +0", ledger.gains().isEmpty());
 	}
 }

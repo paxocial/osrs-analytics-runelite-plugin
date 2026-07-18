@@ -4,7 +4,11 @@
  */
 package com.cortalabs.osrs.analytics;
 
+import com.cortalabs.osrs.analytics.SessionLedger.SkillGain;
 import com.cortalabs.osrs.analytics.transport.AnalyticsClient;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import net.runelite.api.vars.AccountType;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
@@ -15,35 +19,40 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * Guards the panel's honesty gate — the one place display truth is decided. Nothing
- * defaults to zero, no name is invented, and an unread progression stays absent rather
- * than reading as a real reading of nothing. This is the pure test of the product's
- * signature failure (a value that answers a different question than its label).
+ * defaults to zero, no name is invented, an unread progression stays absent rather than
+ * reading as a real reading of nothing, and the events counter carries its real meaning.
+ * This is the pure test of the product's signature failure (a value that answers a
+ * different question than its label).
  */
 public class PanelModelTest
 {
 	private static final String VERSION = "1.3.0";
+	private static final List<SkillGain> NO_GAINS = Collections.emptyList();
 
 	// ------------------------------------------------------------------
 	// No account — honestly absent, never fabricated.
 	// ------------------------------------------------------------------
 
 	/**
-	 * MUTATION-PROVE (identity honesty). With no account witnessed, the name and type
-	 * are dropped even when raw values are passed in. Leak the rsn through when presence
-	 * is NONE and this reads "Zezima" for a name nobody has witnessed -> fails.
+	 * MUTATION-PROVE (identity honesty). With no account witnessed, the name, type and
+	 * per-skill gains are dropped even when raw values are passed in. Leak the rsn
+	 * through when presence is NONE and this reads "Zezima" for a name nobody has
+	 * witnessed -> fails.
 	 */
 	@Test
-	public void noAccountDropsNameAndTypeAndSession()
+	public void noAccountDropsNameTypeSessionAndGains()
 	{
 		PanelModel model = PanelModel.of(
 			AnalyticsClient.State.IDLE, true, 0, 0L, 0L, "http://localhost:8000",
 			AccountPresence.NONE, "Zezima", AccountType.IRONMAN,
-			999_999L, 9, ProgressionReading.of(225, 114, 37, 48), VERSION);
+			999_999L, 9, Arrays.asList(new SkillGain("Mining", 180L)),
+			ProgressionReading.of(225, 114, 37, 48), VERSION);
 
 		assertEquals(AccountPresence.NONE, model.presence);
 		assertNull("no account witnessed: the name is not invented", model.rsn);
 		assertNull("no account witnessed: the type is not invented", model.accountType);
 		assertFalse("the session is not 'known' before an account is seen", model.sessionKnown);
+		assertTrue("no account witnessed: no per-skill gains are shown", model.skillGains.isEmpty());
 	}
 
 	// ------------------------------------------------------------------
@@ -62,7 +71,7 @@ public class PanelModelTest
 	{
 		PanelModel fromNull = PanelModel.of(
 			AnalyticsClient.State.OK, true, 0, 0L, 0L, "u",
-			AccountPresence.LIVE, "Zezima", AccountType.NORMAL, 0L, 0, null, VERSION);
+			AccountPresence.LIVE, "Zezima", AccountType.NORMAL, 0L, 0, NO_GAINS, null, VERSION);
 		assertSame("a null reading becomes the shared UNKNOWN sentinel",
 			ProgressionReading.UNKNOWN, fromNull.progression);
 		assertFalse("absent progression is not a reading of zero", fromNull.progression.known);
@@ -70,21 +79,22 @@ public class PanelModelTest
 		PanelModel fromUnknown = PanelModel.of(
 			AnalyticsClient.State.OK, true, 0, 0L, 0L, "u",
 			AccountPresence.LIVE, "Zezima", AccountType.NORMAL, 0L, 0,
-			ProgressionReading.UNKNOWN, VERSION);
+			NO_GAINS, ProgressionReading.UNKNOWN, VERSION);
 		assertFalse(fromUnknown.progression.known);
 	}
 
 	// ------------------------------------------------------------------
-	// Witnessed values pass through faithfully.
+	// The events counter carries its real meaning; witnessed values pass through.
 	// ------------------------------------------------------------------
 
 	@Test
-	public void witnessedValuesPassThrough()
+	public void witnessedValuesAndEventsCounterPassThrough()
 	{
+		List<SkillGain> gains = Arrays.asList(new SkillGain("Mining", 180L), new SkillGain("Fishing", 40L));
 		PanelModel model = PanelModel.of(
-			AnalyticsClient.State.OK, true, 3, 123_456_789L, 42L, "http://localhost:8000",
+			AnalyticsClient.State.OK, true, 3, 123_456_789L, 228L, "http://localhost:8000",
 			AccountPresence.LIVE, "Zezima", AccountType.NORMAL,
-			5000L, 3, ProgressionReading.of(225, 114, 37, 48), VERSION);
+			5000L, 3, gains, ProgressionReading.of(225, 114, 37, 48), VERSION);
 
 		assertEquals(PanelText.Tone.OK, model.connectionTone);
 		assertEquals("The ledger is listening.", model.connectionLine);
@@ -97,7 +107,11 @@ public class PanelModelTest
 		assertTrue(model.sessionKnown);
 		assertEquals(5000L, model.xpGained);
 		assertEquals(3, model.skillsAdvanced);
-		assertEquals("snapshots sent is the transport's real accepted count", 42L, model.snapshotsSent);
+		assertEquals("the events counter is the transport's real accepted count, not a snapshot count",
+			228L, model.eventsSent);
+		assertEquals("the per-skill breakdown passes through in order", 2, model.skillGains.size());
+		assertEquals("Mining", model.skillGains.get(0).skill);
+		assertEquals(180L, model.skillGains.get(0).gained);
 
 		assertTrue(model.progression.known);
 		assertEquals(225, model.progression.questPoints);
@@ -118,7 +132,7 @@ public class PanelModelTest
 		PanelModel model = PanelModel.of(
 			AnalyticsClient.State.OK, true, 0, 10L, 1L, "u",
 			AccountPresence.AWAY, "Zezima", AccountType.HARDCORE_IRONMAN,
-			5000L, 3, ProgressionReading.of(30, 5, 2, 48), VERSION);
+			5000L, 3, NO_GAINS, ProgressionReading.of(30, 5, 2, 48), VERSION);
 
 		assertEquals(AccountPresence.AWAY, model.presence);
 		assertEquals("a witnessed account stays named after logout", "Zezima", model.rsn);
@@ -131,13 +145,13 @@ public class PanelModelTest
 	{
 		PanelModel auth = PanelModel.of(
 			AnalyticsClient.State.AUTH_FAILED, true, 0, 0L, 0L, "u",
-			AccountPresence.LIVE, "Zezima", AccountType.NORMAL, 0L, 0, ProgressionReading.UNKNOWN, VERSION);
+			AccountPresence.LIVE, "Zezima", AccountType.NORMAL, 0L, 0, NO_GAINS, ProgressionReading.UNKNOWN, VERSION);
 		assertEquals(PanelText.Tone.ERROR, auth.connectionTone);
 		assertEquals("The key was refused.", auth.connectionLine);
 
 		PanelModel off = PanelModel.of(
 			AnalyticsClient.State.OK, false, 0, 0L, 0L, "u",
-			AccountPresence.LIVE, "Zezima", AccountType.NORMAL, 0L, 0, ProgressionReading.UNKNOWN, VERSION);
+			AccountPresence.LIVE, "Zezima", AccountType.NORMAL, 0L, 0, NO_GAINS, ProgressionReading.UNKNOWN, VERSION);
 		assertEquals("telemetry off overrides an OK state", PanelText.Tone.OFF, off.connectionTone);
 		assertEquals("Telemetry is off.", off.connectionLine);
 	}
@@ -147,7 +161,7 @@ public class PanelModelTest
 	{
 		PanelModel model = PanelModel.of(
 			AnalyticsClient.State.IDLE, true, 0, 0L, 0L, null,
-			AccountPresence.NONE, null, null, 0L, 0, ProgressionReading.UNKNOWN, VERSION);
+			AccountPresence.NONE, null, null, 0L, 0, NO_GAINS, ProgressionReading.UNKNOWN, VERSION);
 		assertEquals("", model.backendUrl);
 	}
 }

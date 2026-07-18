@@ -4,7 +4,10 @@
  */
 package com.cortalabs.osrs.analytics;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -73,6 +76,29 @@ public final class SessionLedger
 		return skillsAdvanced;
 	}
 
+	/**
+	 * The per-skill breakdown of the session so far: one entry per skill witnessed
+	 * climbing, largest gain first (ties broken by skill name). Only real gains appear —
+	 * a skill at its baseline is absent, never listed as {@code +0}. Synchronized against
+	 * {@link #observe} so the EDT reads a consistent snapshot while the client thread writes.
+	 */
+	public synchronized List<SkillGain> gains()
+	{
+		List<SkillGain> out = new ArrayList<>();
+		for (Map.Entry<String, Long> entry : current.entrySet())
+		{
+			long base = baseline.getOrDefault(entry.getKey(), entry.getValue());
+			long gain = entry.getValue() - base;
+			if (gain > 0L)
+			{
+				out.add(new SkillGain(entry.getKey(), gain));
+			}
+		}
+		out.sort(Comparator.comparingLong((SkillGain g) -> g.gained).reversed()
+			.thenComparing(g -> g.skill));
+		return out;
+	}
+
 	private void recompute()
 	{
 		long total = 0L;
@@ -89,5 +115,18 @@ public final class SessionLedger
 		}
 		xpGained = total;
 		skillsAdvanced = advanced;
+	}
+
+	/** One skill's witnessed session gain: the skill name and the XP it climbed. */
+	public static final class SkillGain
+	{
+		public final String skill;
+		public final long gained;
+
+		SkillGain(String skill, long gained)
+		{
+			this.skill = skill;
+			this.gained = gained;
+		}
 	}
 }

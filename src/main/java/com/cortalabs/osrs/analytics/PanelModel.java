@@ -4,7 +4,10 @@
  */
 package com.cortalabs.osrs.analytics;
 
+import com.cortalabs.osrs.analytics.SessionLedger.SkillGain;
 import com.cortalabs.osrs.analytics.transport.AnalyticsClient;
+import java.util.Collections;
+import java.util.List;
 import net.runelite.api.vars.AccountType;
 
 /**
@@ -43,7 +46,15 @@ final class PanelModel
 	final boolean sessionKnown;
 	final long xpGained;
 	final int skillsAdvanced;
-	final long snapshotsSent;
+	/**
+	 * Telemetry events the backend has accepted this session (the transport's
+	 * {@code totalAccepted} across every category — XP, quests, diaries, activity, and
+	 * the rest). This is deliberately NOT called "snapshots": it counts accepted events,
+	 * dominated early by the one-time first-scan quest census, so its label must say so.
+	 */
+	final long eventsSent;
+	/** Per-skill session XP breakdown, largest first; empty when nothing has climbed. */
+	final List<SkillGain> skillGains;
 
 	// Progression at a glance.
 	final ProgressionReading progression;
@@ -53,7 +64,7 @@ final class PanelModel
 
 	private PanelModel(PanelText.Tone connectionTone, String connectionLine, String backendUrl,
 		int queueDepth, long lastAcceptedMs, AccountPresence presence, String rsn, String accountType,
-		boolean sessionKnown, long xpGained, int skillsAdvanced, long snapshotsSent,
+		boolean sessionKnown, long xpGained, int skillsAdvanced, long eventsSent, List<SkillGain> skillGains,
 		ProgressionReading progression, String version)
 	{
 		this.connectionTone = connectionTone;
@@ -67,7 +78,8 @@ final class PanelModel
 		this.sessionKnown = sessionKnown;
 		this.xpGained = xpGained;
 		this.skillsAdvanced = skillsAdvanced;
-		this.snapshotsSent = snapshotsSent;
+		this.eventsSent = eventsSent;
+		this.skillGains = skillGains;
 		this.progression = progression;
 		this.version = version;
 	}
@@ -82,22 +94,24 @@ final class PanelModel
 	 * @param enabled       whether telemetry is switched on
 	 * @param queueDepth    events waiting to send
 	 * @param lastAcceptedMs wall-clock of the last accepted batch, or {@code 0}
-	 * @param snapshotsSent accepted events this session
+	 * @param eventsSent    accepted telemetry events this session (all categories)
 	 * @param backendUrl    the backend base URL (never the key), or {@code null}
 	 * @param presence      whether an account is live, away, or never seen
 	 * @param rsn           the witnessed display name (ignored when {@code NONE})
 	 * @param accountType   the witnessed account type (labelled here; ignored when {@code NONE})
 	 * @param xpGained      session XP witnessed climbing
 	 * @param skillsAdvanced distinct skills witnessed climbing
+	 * @param skillGains    per-skill session XP breakdown, or {@code null} for none
 	 * @param progression   the last progression reading, or {@code null} for none
 	 * @param version       the honest plugin version string
 	 */
 	static PanelModel of(AnalyticsClient.State state, boolean enabled, int queueDepth, long lastAcceptedMs,
-		long snapshotsSent, String backendUrl, AccountPresence presence, String rsn, AccountType accountType,
-		long xpGained, int skillsAdvanced, ProgressionReading progression, String version)
+		long eventsSent, String backendUrl, AccountPresence presence, String rsn, AccountType accountType,
+		long xpGained, int skillsAdvanced, List<SkillGain> skillGains, ProgressionReading progression, String version)
 	{
 		PanelText.ConnectionView conn = PanelText.connection(state, enabled);
 		boolean known = presence != AccountPresence.NONE;
+		List<SkillGain> gains = (!known || skillGains == null) ? Collections.emptyList() : skillGains;
 		return new PanelModel(
 			conn.tone,
 			conn.line,
@@ -110,7 +124,8 @@ final class PanelModel
 			known,
 			xpGained,
 			skillsAdvanced,
-			snapshotsSent,
+			eventsSent,
+			gains,
 			progression == null ? ProgressionReading.UNKNOWN : progression,
 			version);
 	}

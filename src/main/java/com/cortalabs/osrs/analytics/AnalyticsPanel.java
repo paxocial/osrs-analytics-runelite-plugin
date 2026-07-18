@@ -10,18 +10,13 @@ import com.cortalabs.osrs.analytics.transport.AnalyticsClient;
 import com.cortalabs.osrs.analytics.transport.LookupClient;
 import com.cortalabs.osrs.analytics.transport.PlayerLookup;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.GridLayout;
 import java.time.ZoneId;
-import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
-import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.border.EmptyBorder;
@@ -38,33 +33,24 @@ import net.runelite.client.ui.components.materialtabs.MaterialTabGroup;
  *
  * <ul>
  *   <li><b>Ledger</b> — connection truth, the account being watched, the session so
- *       far, and the account's progression at a glance. Every value is witnessed or
- *       honestly absent; nothing defaults to zero and no label answers a different
- *       question than its value.</li>
+ *       far (with a per-skill XP breakdown), and progression at a glance. Every value
+ *       is witnessed or honestly absent; nothing defaults to zero and no label answers
+ *       a different question than its value. Rendered by {@link LedgerContent}.</li>
  *   <li><b>Lookup</b> — a hiscores search for any name, driven by the search box and
  *       the right-click "Analytics lookup" menu.</li>
  * </ul>
  *
- * <p>Rendering is thin: the panel reads a {@link PanelModel} built from the transport's
- * atomic snapshot and the client-thread {@link PanelStateTracker}, and updates its
- * labels in place. It never touches the game client. A single one-second timer keeps
- * the relative clock ("12s ago") honest and observes the transport, which changes on
- * its own scheduler thread with no event to hook; witnessed data changes push a
- * re-render immediately via the tracker's listener.
+ * <p>Rendering is thin: {@link #refresh()} builds a {@link PanelModel} from the
+ * transport's atomic snapshot and the client-thread {@link PanelStateTracker}, then
+ * hands it to {@link LedgerContent}. It never touches the game client. A single
+ * one-second timer keeps the relative clock ("12s ago") honest and observes the
+ * transport, which changes on its own scheduler thread with no event to hook;
+ * witnessed data changes push a re-render immediately via the tracker's listener.
  */
 class AnalyticsPanel extends PluginPanel
 {
 	private static final int MAX_USERNAME_LENGTH = 12;
 	private static final char NBSP = ' ';
-
-	private static final Color OK_COLOR = new Color(76, 175, 80);
-	private static final Color WARN_COLOR = new Color(255, 179, 0);
-	private static final Color ERROR_COLOR = new Color(229, 57, 53);
-	private static final Color IDLE_COLOR = ColorScheme.LIGHT_GRAY_COLOR;
-	private static final Color OFF_COLOR = new Color(124, 118, 110);
-	private static final Color INK = Color.WHITE;
-	private static final Color INK_DIM = ColorScheme.LIGHT_GRAY_COLOR;
-	private static final Color ACCENT = ColorScheme.BRAND_ORANGE;
 
 	private final AnalyticsClient client;
 	private final LookupClient lookupClient;
@@ -72,45 +58,11 @@ class AnalyticsPanel extends PluginPanel
 	private final ZoneId zone = ZoneId.systemDefault();
 	private final Timer refreshTimer;
 
+	private final LedgerContent ledger;
 	private final MaterialTabGroup tabGroup;
 	private final MaterialTab lookupTab;
 
-	// --- Ledger tab widgets (updated in place by refresh()) ---
-	private final JLabel connDot = new JLabel("●");
-	private final JLabel connLine = new JLabel();
-	private final JLabel sentValue = new JLabel();
-	private final JLabel queueValue = new JLabel();
-	private final JLabel backendValue = new JLabel();
-
-	private final JLabel acctName = new JLabel();
-	private final JLabel acctType = new JLabel();
-
-	private final JPanel sessionGrid = grid();
-	private final JLabel sessionEmpty = stewardLine();
-	private final JLabel xpGainedValue = valueLabel();
-	private final JLabel skillsValue = valueLabel();
-	private final JLabel snapshotsValue = valueLabel();
-
-	private final JPanel progressionGrid = grid();
-	private final JLabel progressionEmpty = stewardLine();
-	private final JLabel questPointsValue = valueLabel();
-	private final JLabel questsValue = valueLabel();
-	private final JLabel diaryValue = valueLabel();
-
-	private final JLabel versionValue = new JLabel();
-
-	// Cards whose contents swap between a grid and a steward line; revalidated on flip.
-	private final JPanel sessionCard;
-	private final JPanel progressionCard;
-	private final JPanel accountCard;
-
-	// Last-rendered structural state, so we revalidate only when a layout actually changes.
-	private Boolean lastSessionKnown;
-	private Boolean lastProgressionKnown;
-	private Boolean lastQueueVisible;
-	private AccountPresence lastPresence;
-
-	// --- Lookup tab widgets ---
+	// Lookup tab widgets.
 	private final IconTextField searchBar = new IconTextField();
 	private final JPanel lookupResults = new JPanel();
 
@@ -128,13 +80,14 @@ class AnalyticsPanel extends PluginPanel
 		JPanel display = new JPanel(new BorderLayout());
 		display.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-		// Cards that own a grid/steward-line swap are built before the tab so the fields exist.
-		accountCard = buildAccountCard();
-		sessionCard = buildSessionCard();
-		progressionCard = buildProgressionCard();
+		ledger = new LedgerContent(() ->
+		{
+			client.flushNow();
+			refresh();
+		});
 
 		tabGroup = new MaterialTabGroup(display);
-		MaterialTab ledgerTab = new MaterialTab("Ledger", tabGroup, buildLedgerTab());
+		MaterialTab ledgerTab = new MaterialTab("Ledger", tabGroup, ledger);
 		lookupTab = new MaterialTab("Lookup", tabGroup, buildLookupTab());
 		tabGroup.setBorder(new EmptyBorder(0, 0, 8, 0));
 		tabGroup.addTab(ledgerTab);
@@ -168,147 +121,9 @@ class AnalyticsPanel extends PluginPanel
 		doLookup();
 	}
 
-	// ------------------------------------------------------------------
-	// Ledger tab
-	// ------------------------------------------------------------------
-
-	private JPanel buildLedgerTab()
-	{
-		JPanel body = new JPanel();
-		body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
-		body.setBackground(ColorScheme.DARK_GRAY_COLOR);
-
-		body.add(buildConnectionCard());
-		body.add(Box.createVerticalStrut(8));
-		body.add(accountCard);
-		body.add(Box.createVerticalStrut(8));
-		body.add(sessionCard);
-		body.add(Box.createVerticalStrut(8));
-		body.add(progressionCard);
-		body.add(Box.createVerticalStrut(10));
-		body.add(buildFooter());
-		return body;
-	}
-
-	private JPanel buildConnectionCard()
-	{
-		JPanel card = card();
-
-		connDot.setForeground(IDLE_COLOR);
-		connLine.setFont(FontManager.getRunescapeBoldFont());
-		connLine.setForeground(INK);
-		JPanel head = new JPanel(new BorderLayout(6, 0));
-		head.setBackground(card.getBackground());
-		head.setAlignmentX(Component.LEFT_ALIGNMENT);
-		head.add(connDot, BorderLayout.WEST);
-		head.add(connLine, BorderLayout.CENTER);
-		card.add(head);
-
-		card.add(Box.createVerticalStrut(6));
-		card.add(valueRow("Last sent", sentValue));
-
-		queueValue.setFont(FontManager.getRunescapeSmallFont());
-		queueValue.setForeground(INK_DIM);
-		queueValue.setAlignmentX(Component.LEFT_ALIGNMENT);
-		queueValue.setBorder(new EmptyBorder(2, 0, 0, 0));
-		card.add(queueValue);
-
-		backendValue.setFont(FontManager.getRunescapeSmallFont());
-		backendValue.setForeground(OFF_COLOR);
-		backendValue.setAlignmentX(Component.LEFT_ALIGNMENT);
-		backendValue.setBorder(new EmptyBorder(6, 0, 0, 0));
-		card.add(backendValue);
-
-		return card;
-	}
-
-	private JPanel buildAccountCard()
-	{
-		JPanel card = card();
-		card.add(heading("Account"));
-		card.add(Box.createVerticalStrut(4));
-
-		acctName.setFont(FontManager.getRunescapeBoldFont());
-		acctName.setForeground(INK);
-		acctName.setAlignmentX(Component.LEFT_ALIGNMENT);
-		card.add(acctName);
-
-		acctType.setFont(FontManager.getRunescapeSmallFont());
-		acctType.setForeground(INK_DIM);
-		acctType.setAlignmentX(Component.LEFT_ALIGNMENT);
-		card.add(acctType);
-
-		return card;
-	}
-
-	private JPanel buildSessionCard()
-	{
-		JPanel card = card();
-		card.add(heading("This session"));
-		card.add(Box.createVerticalStrut(4));
-
-		sessionGrid.add(keyLabel("XP gained"));
-		sessionGrid.add(xpGainedValue);
-		sessionGrid.add(keyLabel("Skills advanced"));
-		sessionGrid.add(skillsValue);
-		sessionGrid.add(keyLabel("Snapshots sent"));
-		sessionGrid.add(snapshotsValue);
-		card.add(sessionGrid);
-		card.add(sessionEmpty);
-
-		return card;
-	}
-
-	private JPanel buildProgressionCard()
-	{
-		JPanel card = card();
-		card.add(heading("At a glance"));
-		card.add(Box.createVerticalStrut(4));
-
-		progressionGrid.add(keyLabel("Quest points"));
-		progressionGrid.add(questPointsValue);
-		progressionGrid.add(keyLabel("Quests"));
-		progressionGrid.add(questsValue);
-		progressionGrid.add(keyLabel("Diary tiers"));
-		progressionGrid.add(diaryValue);
-		card.add(progressionGrid);
-		card.add(progressionEmpty);
-
-		return card;
-	}
-
-	private JPanel buildFooter()
-	{
-		JPanel footer = new JPanel();
-		footer.setLayout(new BoxLayout(footer, BoxLayout.Y_AXIS));
-		footer.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		footer.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-		JButton send = new JButton("Send now");
-		send.setFocusPainted(false);
-		send.setForeground(INK);
-		send.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		send.setAlignmentX(Component.LEFT_ALIGNMENT);
-		send.setMaximumSize(new Dimension(Integer.MAX_VALUE, send.getPreferredSize().height));
-		send.addActionListener(e ->
-		{
-			client.flushNow();
-			refresh();
-		});
-		footer.add(send);
-
-		versionValue.setFont(FontManager.getRunescapeSmallFont());
-		versionValue.setForeground(OFF_COLOR);
-		versionValue.setAlignmentX(Component.LEFT_ALIGNMENT);
-		versionValue.setBorder(new EmptyBorder(6, 0, 0, 0));
-		footer.add(versionValue);
-
-		return footer;
-	}
-
 	/**
-	 * Rebuild the render model from live transport + tracked client state and update
-	 * every label in place. Always runs on the EDT (timer tick or the tracker's
+	 * Rebuild the render model from live transport + tracked client state and hand it to
+	 * the ledger content. Always runs on the EDT (timer tick or the tracker's
 	 * {@code invokeLater} push); reads only atomics and published volatiles, never the
 	 * game client.
 	 */
@@ -328,144 +143,10 @@ class AnalyticsPanel extends PluginPanel
 			state.accountType,
 			tracker.xpGained(),
 			tracker.skillsAdvanced(),
+			tracker.gains(),
 			state.progression,
 			Payloads.PLUGIN_VERSION);
-
-		renderConnection(model);
-		renderAccount(model);
-		renderSession(model);
-		renderProgression(model);
-		versionValue.setText("Catherby v" + model.version);
-	}
-
-	private void renderConnection(PanelModel model)
-	{
-		connDot.setForeground(toneColor(model.connectionTone));
-		connLine.setText(model.connectionLine);
-
-		if (model.lastAcceptedMs <= 0L)
-		{
-			sentValue.setText("never");
-		}
-		else
-		{
-			long now = System.currentTimeMillis();
-			sentValue.setText(PanelText.clock(model.lastAcceptedMs, zone)
-				+ " · " + PanelText.since(model.lastAcceptedMs, now));
-		}
-
-		boolean queueVisible = model.queueDepth > 0;
-		queueValue.setText(queueVisible ? model.queueDepth + " waiting to send" : "");
-		queueValue.setVisible(queueVisible);
-		if (lastQueueVisible == null || lastQueueVisible != queueVisible)
-		{
-			lastQueueVisible = queueVisible;
-			if (queueValue.getParent() != null)
-			{
-				queueValue.getParent().revalidate();
-			}
-		}
-
-		backendValue.setText(model.backendUrl.isEmpty() ? "No backend set" : model.backendUrl);
-	}
-
-	private void renderAccount(PanelModel model)
-	{
-		switch (model.presence)
-		{
-			case LIVE:
-				acctName.setText(model.rsn);
-				acctName.setForeground(INK);
-				acctType.setText(model.accountType == null ? "" : model.accountType);
-				acctType.setForeground(INK_DIM);
-				acctType.setVisible(model.accountType != null);
-				break;
-			case AWAY:
-				acctName.setText(model.rsn);
-				acctName.setForeground(INK_DIM);
-				acctType.setText(model.accountType == null ? "signed out" : model.accountType + " · signed out");
-				acctType.setForeground(OFF_COLOR);
-				acctType.setVisible(true);
-				break;
-			case NONE:
-			default:
-				acctName.setText("No account witnessed yet.");
-				acctName.setForeground(INK_DIM);
-				acctType.setText("");
-				acctType.setVisible(false);
-				break;
-		}
-		if (model.presence != lastPresence)
-		{
-			lastPresence = model.presence;
-			accountCard.revalidate();
-			accountCard.repaint();
-		}
-	}
-
-	private void renderSession(PanelModel model)
-	{
-		boolean known = model.sessionKnown;
-		if (known)
-		{
-			xpGainedValue.setText(PanelText.integer(model.xpGained));
-			skillsValue.setText(PanelText.integer(model.skillsAdvanced));
-			snapshotsValue.setText(PanelText.integer(model.snapshotsSent));
-		}
-		else
-		{
-			sessionEmpty.setText("Nothing recorded yet.");
-		}
-		swap(sessionCard, sessionGrid, sessionEmpty, known, lastSessionKnown);
-		lastSessionKnown = known;
-	}
-
-	private void renderProgression(PanelModel model)
-	{
-		boolean known = model.progression.known;
-		if (known)
-		{
-			questPointsValue.setText(PanelText.integer(model.progression.questPoints));
-			questsValue.setText(PanelText.integer(model.progression.questsComplete));
-			diaryValue.setText(PanelText.integer(model.progression.diaryTiersComplete)
-				+ " / " + PanelText.integer(model.progression.diaryTiersTotal));
-		}
-		else
-		{
-			progressionEmpty.setText("Not witnessed yet.");
-		}
-		swap(progressionCard, progressionGrid, progressionEmpty, known, lastProgressionKnown);
-		lastProgressionKnown = known;
-	}
-
-	/** Show the grid or the steward line, and revalidate the card only when it flips. */
-	private static void swap(JPanel card, JPanel grid, JLabel empty, boolean showGrid, Boolean previous)
-	{
-		grid.setVisible(showGrid);
-		empty.setVisible(!showGrid);
-		if (previous == null || previous != showGrid)
-		{
-			card.revalidate();
-			card.repaint();
-		}
-	}
-
-	private static Color toneColor(PanelText.Tone tone)
-	{
-		switch (tone)
-		{
-			case OK:
-				return OK_COLOR;
-			case WARN:
-				return WARN_COLOR;
-			case ERROR:
-				return ERROR_COLOR;
-			case OFF:
-				return OFF_COLOR;
-			case IDLE:
-			default:
-				return IDLE_COLOR;
-		}
+		ledger.render(model, zone, System.currentTimeMillis());
 	}
 
 	// ------------------------------------------------------------------
@@ -558,7 +239,7 @@ class AnalyticsPanel extends PluginPanel
 	{
 		lookupResults.removeAll();
 		JLabel label = new JLabel(message);
-		label.setForeground(INK_DIM);
+		label.setForeground(PanelWidgets.INK_DIM);
 		label.setAlignmentX(Component.LEFT_ALIGNMENT);
 		lookupResults.add(label);
 		lookupResults.revalidate();
@@ -571,7 +252,7 @@ class AnalyticsPanel extends PluginPanel
 
 		JLabel name = new JLabel(result.displayName);
 		name.setFont(FontManager.getRunescapeBoldFont());
-		name.setForeground(INK);
+		name.setForeground(PanelWidgets.INK);
 		name.setAlignmentX(Component.LEFT_ALIGNMENT);
 		lookupResults.add(name);
 
@@ -587,7 +268,7 @@ class AnalyticsPanel extends PluginPanel
 		if (sub.length() > 0)
 		{
 			JLabel subLabel = new JLabel(sub.toString());
-			subLabel.setForeground(INK_DIM);
+			subLabel.setForeground(PanelWidgets.INK_DIM);
 			subLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 			lookupResults.add(subLabel);
 		}
@@ -596,7 +277,7 @@ class AnalyticsPanel extends PluginPanel
 		{
 			lookupResults.add(Box.createVerticalStrut(6));
 			JLabel overall = new JLabel("Overall " + result.overall.level + "  (" + formatXp(result.overall.experience) + " xp)");
-			overall.setForeground(OK_COLOR);
+			overall.setForeground(PanelWidgets.OK);
 			overall.setAlignmentX(Component.LEFT_ALIGNMENT);
 			lookupResults.add(overall);
 		}
@@ -604,12 +285,12 @@ class AnalyticsPanel extends PluginPanel
 		if (!result.skills.isEmpty())
 		{
 			lookupResults.add(Box.createVerticalStrut(8));
-			lookupResults.add(heading("Skills"));
-			JPanel grid = grid();
+			lookupResults.add(PanelWidgets.heading("Skills"));
+			JPanel grid = PanelWidgets.grid();
 			for (PlayerLookup.SkillRow skill : result.skills)
 			{
-				grid.add(keyLabel(capitalize(skill.name)));
-				grid.add(valueLabel(Integer.toString(skill.level)));
+				grid.add(PanelWidgets.keyLabel(capitalize(skill.name)));
+				grid.add(PanelWidgets.valueLabel(Integer.toString(skill.level)));
 			}
 			lookupResults.add(grid);
 		}
@@ -617,16 +298,16 @@ class AnalyticsPanel extends PluginPanel
 		if (!result.activities.isEmpty())
 		{
 			lookupResults.add(Box.createVerticalStrut(8));
-			lookupResults.add(heading("Activities"));
-			JPanel grid = grid();
+			lookupResults.add(PanelWidgets.heading("Activities"));
+			JPanel grid = PanelWidgets.grid();
 			for (PlayerLookup.ActivityRow activity : result.activities)
 			{
 				if (activity.score < 0)
 				{
 					continue; // unranked
 				}
-				grid.add(keyLabel(capitalize(activity.name)));
-				grid.add(valueLabel(Long.toString(activity.score)));
+				grid.add(PanelWidgets.keyLabel(capitalize(activity.name)));
+				grid.add(PanelWidgets.valueLabel(Long.toString(activity.score)));
 			}
 			lookupResults.add(grid);
 		}
@@ -636,7 +317,7 @@ class AnalyticsPanel extends PluginPanel
 	}
 
 	// ------------------------------------------------------------------
-	// Shared widget helpers
+	// Lookup helpers
 	// ------------------------------------------------------------------
 
 	private static String sanitize(String value)
@@ -670,80 +351,5 @@ class AnalyticsPanel extends PluginPanel
 	{
 		int t = iso.indexOf('T');
 		return t > 0 ? iso.substring(0, t) : iso;
-	}
-
-	private JLabel heading(String text)
-	{
-		JLabel label = new JLabel(text.toUpperCase());
-		label.setFont(FontManager.getRunescapeSmallFont());
-		label.setForeground(ACCENT);
-		label.setAlignmentX(Component.LEFT_ALIGNMENT);
-		return label;
-	}
-
-	private static JLabel stewardLine()
-	{
-		JLabel label = new JLabel();
-		label.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		label.setAlignmentX(Component.LEFT_ALIGNMENT);
-		return label;
-	}
-
-	private JPanel grid()
-	{
-		JPanel grid = new JPanel(new GridLayout(0, 2, 4, 3));
-		grid.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		grid.setAlignmentX(Component.LEFT_ALIGNMENT);
-		return grid;
-	}
-
-	private JLabel keyLabel(String text)
-	{
-		JLabel label = new JLabel(text);
-		label.setForeground(INK_DIM);
-		return label;
-	}
-
-	private static JLabel valueLabel()
-	{
-		JLabel label = new JLabel();
-		label.setForeground(INK);
-		label.setHorizontalAlignment(SwingConstants.RIGHT);
-		return label;
-	}
-
-	private JLabel valueLabel(String text)
-	{
-		JLabel label = new JLabel(text);
-		label.setForeground(INK);
-		label.setHorizontalAlignment(SwingConstants.RIGHT);
-		return label;
-	}
-
-	private JPanel card()
-	{
-		JPanel panel = new JPanel();
-		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-		panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		panel.setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createLineBorder(ColorScheme.MEDIUM_GRAY_COLOR),
-			new EmptyBorder(8, 8, 8, 8)));
-		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
-		return panel;
-	}
-
-	private JPanel valueRow(String name, JLabel value)
-	{
-		JPanel panel = new JPanel(new BorderLayout());
-		panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		panel.setBorder(new EmptyBorder(2, 0, 2, 0));
-		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
-		JLabel label = new JLabel(name);
-		label.setForeground(INK_DIM);
-		panel.add(label, BorderLayout.WEST);
-		value.setForeground(INK);
-		value.setHorizontalAlignment(SwingConstants.RIGHT);
-		panel.add(value, BorderLayout.EAST);
-		return panel;
 	}
 }
