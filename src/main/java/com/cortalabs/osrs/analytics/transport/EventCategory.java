@@ -31,5 +31,9 @@ public enum EventCategory
 	ACTIVITY_TIME,
 	// Wave-A Full Picture discrete-event lanes (FP-A5), appended after ACTIVITY_TIME.
 	SIGNAL_EVENT,
-	GE_TRADE
+	GE_TRADE,
+	// Wave-B Full Picture lanes (FP-B4), appended after GE_TRADE.
+	SLAYER_TASK,
+	NPC_KILLS,
+	FARMING_STATE
 }

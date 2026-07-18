@@ -54,4 +54,13 @@ public class BatchPayload extends PluginPayload
 
 	@SerializedName("ge_trades")
 	public List<GeTrade> geTrades;
+
+	@SerializedName("slayer_tasks")
+	public List<SlayerTaskUpdate> slayerTasks;
+
+	@SerializedName("npc_kills")
+	public List<NpcKillCounts> npcKills;
+
+	@SerializedName("farming_state")
+	public List<FarmingState> farmingState;
 }

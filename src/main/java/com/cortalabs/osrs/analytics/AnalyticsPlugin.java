@@ -12,14 +12,17 @@ import com.cortalabs.osrs.analytics.collector.CombatAchievementCollector;
 import com.cortalabs.osrs.analytics.collector.DiaryCollector;
 import com.cortalabs.osrs.analytics.collector.EfficiencyCollector;
 import com.cortalabs.osrs.analytics.collector.EquipmentCollector;
+import com.cortalabs.osrs.analytics.collector.FarmingCollector;
 import com.cortalabs.osrs.analytics.collector.GeTradeCollector;
 import com.cortalabs.osrs.analytics.collector.LootCollector;
 import com.cortalabs.osrs.analytics.collector.NameChangeCollector;
+import com.cortalabs.osrs.analytics.collector.NpcKillCollector;
 import com.cortalabs.osrs.analytics.collector.PanelStateTracker;
 import com.cortalabs.osrs.analytics.collector.QuestCollector;
 import com.cortalabs.osrs.analytics.collector.RegionTimeShareCollector;
 import com.cortalabs.osrs.analytics.collector.SessionCollector;
 import com.cortalabs.osrs.analytics.collector.SignalEventCollector;
+import com.cortalabs.osrs.analytics.collector.SlayerCollector;
 import com.cortalabs.osrs.analytics.collector.XpCollector;
 import com.cortalabs.osrs.analytics.transport.AnalyticsClient;
 import com.cortalabs.osrs.analytics.transport.LookupClient;
@@ -142,6 +145,15 @@ public class AnalyticsPlugin extends Plugin
 	private GeTradeCollector geTradeCollector;
 
 	@Inject
+	private SlayerCollector slayerCollector;
+
+	@Inject
+	private NpcKillCollector npcKillCollector;
+
+	@Inject
+	private FarmingCollector farmingCollector;
+
+	@Inject
 	private CollectionLogCollector collectionLogCollector;
 
 	@Inject
@@ -175,6 +187,9 @@ public class AnalyticsPlugin extends Plugin
 			activityClassificationCollector,
 			signalEventCollector,
 			geTradeCollector,
+			slayerCollector,
+			npcKillCollector,
+			farmingCollector,
 			collectionLogCollector,
 			bankCollector,
 			nameChangeCollector,

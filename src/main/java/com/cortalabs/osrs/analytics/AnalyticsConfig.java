@@ -196,6 +196,24 @@ public interface AnalyticsConfig extends Config
 		return true;
 	}
 
+	@ConfigItem(keyName = "trackSlayerTasks", name = "Slayer tasks", description = "Slayer task assignments and completions (creature, count, location, streak, points).", section = categoriesSection, position = 13)
+	default boolean trackSlayerTasks()
+	{
+		return true;
+	}
+
+	@ConfigItem(keyName = "trackNpcKills", name = "NPC kills", description = "Per-session kill counts by NPC, aggregated and sent once at session end.", section = categoriesSection, position = 14)
+	default boolean trackNpcKills()
+	{
+		return true;
+	}
+
+	@ConfigItem(keyName = "trackFarmingState", name = "Farming patches", description = "Farming patch state transitions (planted, ready, diseased, dead).", section = categoriesSection, position = 15)
+	default boolean trackFarmingState()
+	{
+		return true;
+	}
+
 	// --- Private data (off by default) ---
 
 	@ConfigItem(

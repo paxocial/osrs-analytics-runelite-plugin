@@ -14,13 +14,16 @@ import com.cortalabs.osrs.analytics.dto.CombatAchievementProgress;
 import com.cortalabs.osrs.analytics.dto.DiaryProgress;
 import com.cortalabs.osrs.analytics.dto.EfficiencyEnvelope;
 import com.cortalabs.osrs.analytics.dto.EquipmentState;
+import com.cortalabs.osrs.analytics.dto.FarmingState;
 import com.cortalabs.osrs.analytics.dto.GeTrade;
 import com.cortalabs.osrs.analytics.dto.LootDrop;
+import com.cortalabs.osrs.analytics.dto.NpcKillCounts;
 import com.cortalabs.osrs.analytics.dto.PluginPayload;
 import com.cortalabs.osrs.analytics.dto.QuestStatus;
 import com.cortalabs.osrs.analytics.dto.RegionTimeShare;
 import com.cortalabs.osrs.analytics.dto.SessionEvent;
 import com.cortalabs.osrs.analytics.dto.SignalEvent;
+import com.cortalabs.osrs.analytics.dto.SlayerTaskUpdate;
 import com.cortalabs.osrs.analytics.dto.XpSnapshot;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -504,6 +507,15 @@ public class AnalyticsClient
 					break;
 				case GE_TRADE:
 					batch.geTrades = add(batch.geTrades, (GeTrade) p);
+					break;
+				case SLAYER_TASK:
+					batch.slayerTasks = add(batch.slayerTasks, (SlayerTaskUpdate) p);
+					break;
+				case NPC_KILLS:
+					batch.npcKills = add(batch.npcKills, (NpcKillCounts) p);
+					break;
+				case FARMING_STATE:
+					batch.farmingState = add(batch.farmingState, (FarmingState) p);
 					break;
 				default:
 					break;

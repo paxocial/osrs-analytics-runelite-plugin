@@ -743,4 +743,169 @@ public class DtoSerializationTest
 		assertEquals(1, o.getAsJsonArray("signal_events").size());
 		assertEquals(1, o.getAsJsonArray("ge_trades").size());
 	}
+
+	// --- FP-B4 Wave-B lanes (slayer tasks, NPC kills, farming state) ---
+
+	@Test
+	public void slayerTaskUpdateUsesContractFields()
+	{
+		SlayerTaskUpdate task = new SlayerTaskUpdate();
+		task.rsn = "Zezima";
+		task.world = 330;
+		task.timestamp = "2026-07-16T18:41:02.123Z";
+		task.pluginVersion = "1.5.0";
+		task.creature = "GARGOYLES";
+		task.amount = 185;
+		task.location = "Catacombs of Kourend";
+		task.streak = 42;
+		task.points = 1500;
+		task.transition = SlayerTaskUpdate.SlayerTransition.ASSIGNED;
+
+		JsonObject o = json(task);
+		assertEquals("GARGOYLES", o.get("creature").getAsString());
+		assertEquals(185, o.get("amount").getAsInt());
+		assertEquals("Catacombs of Kourend", o.get("location").getAsString());
+		assertEquals(42, o.get("streak").getAsInt());
+		assertEquals(1500, o.get("points").getAsInt());
+		assertEquals("assigned", o.get("transition").getAsString());
+		assertEquals("2026-07-16T18:41:02.123Z", o.get("timestamp").getAsString());
+	}
+
+	@Test
+	public void slayerTaskUpdateOmitsNullOptionalFields()
+	{
+		// A completion carries only creature + transition beyond the base; each null optional
+		// must be ABSENT (not null, not 0), matching the pydantic Optional[...] = None contract.
+		SlayerTaskUpdate task = new SlayerTaskUpdate();
+		task.rsn = "Zezima";
+		task.pluginVersion = "1.5.0";
+		task.creature = "ABYSSAL DEMONS";
+		task.amount = 0;
+		task.location = null;
+		task.streak = null;
+		task.points = null;
+		task.transition = SlayerTaskUpdate.SlayerTransition.COMPLETED;
+
+		JsonObject o = json(task);
+		assertEquals("completed", o.get("transition").getAsString());
+		// amount 0 is a real witnessed zero (task complete), present and distinct from absence.
+		assertEquals(0, o.get("amount").getAsInt());
+		assertFalse("null location must be absent", o.has("location"));
+		assertFalse("null streak must be absent", o.has("streak"));
+		assertFalse("null points must be absent", o.has("points"));
+	}
+
+	@Test
+	public void slayerTransitionEnumValuesMatchContract()
+	{
+		// These two strings are the wire contract shared with the pydantic SlayerTransition
+		// enum in catherby src/catherby/api/schemas/plugin.py.
+		assertEquals("\"assigned\"", GSON.toJson(SlayerTaskUpdate.SlayerTransition.ASSIGNED));
+		assertEquals("\"completed\"", GSON.toJson(SlayerTaskUpdate.SlayerTransition.COMPLETED));
+	}
+
+	@Test
+	public void npcKillCountsUsesContractFields()
+	{
+		NpcKillCounts counts = new NpcKillCounts();
+		counts.rsn = "Zezima";
+		counts.pluginVersion = "1.5.0";
+		counts.sessionId = "sid-b1";
+		counts.kills = Arrays.asList(
+			new NpcKillCounts.NpcKill("Gargoyle", 185),
+			new NpcKillCounts.NpcKill("Zulrah", 3));
+
+		JsonObject o = json(counts);
+		assertEquals("sid-b1", o.get("session_id").getAsString());
+		JsonArray kills = o.getAsJsonArray("kills");
+		assertEquals(2, kills.size());
+		JsonObject first = kills.get(0).getAsJsonObject();
+		assertEquals("Gargoyle", first.get("npc").getAsString());
+		assertEquals(185, first.get("count").getAsInt());
+		// nested NpcKill is a bare BaseModel (extra=forbid): it must NOT carry base fields.
+		assertFalse("nested npc kill must not carry rsn", first.has("rsn"));
+		assertFalse("nested npc kill must not carry plugin_version", first.has("plugin_version"));
+	}
+
+	@Test
+	public void farmingStateUsesContractFields()
+	{
+		FarmingState farming = new FarmingState();
+		farming.rsn = "Zezima";
+		farming.world = 330;
+		farming.pluginVersion = "1.5.0";
+		farming.patch = "Catherby herb";
+		farming.state = FarmingState.FarmingPatchState.READY;
+		farming.plant = "Ranarr";
+
+		JsonObject o = json(farming);
+		assertEquals("Catherby herb", o.get("patch").getAsString());
+		assertEquals("ready", o.get("state").getAsString());
+		assertEquals("Ranarr", o.get("plant").getAsString());
+	}
+
+	@Test
+	public void farmingStateOmitsNullPlant()
+	{
+		// A dead patch loses its produce identity (encoded generically by the game): plant
+		// must be ABSENT (not null), matching the pydantic Optional[str] = None contract.
+		FarmingState farming = new FarmingState();
+		farming.rsn = "Zezima";
+		farming.pluginVersion = "1.5.0";
+		farming.patch = "Falador herb";
+		farming.state = FarmingState.FarmingPatchState.DEAD;
+		farming.plant = null;
+
+		JsonObject o = json(farming);
+		assertEquals("dead", o.get("state").getAsString());
+		assertFalse("null plant must be absent", o.has("plant"));
+	}
+
+	@Test
+	public void farmingPatchStateEnumValuesMatchContract()
+	{
+		// These four strings are the wire contract shared with the pydantic FarmingPatchState
+		// enum; the excluded CropState values (EMPTY, FILLING) have no wire value by design.
+		assertEquals("\"planted\"", GSON.toJson(FarmingState.FarmingPatchState.PLANTED));
+		assertEquals("\"ready\"", GSON.toJson(FarmingState.FarmingPatchState.READY));
+		assertEquals("\"diseased\"", GSON.toJson(FarmingState.FarmingPatchState.DISEASED));
+		assertEquals("\"dead\"", GSON.toJson(FarmingState.FarmingPatchState.DEAD));
+	}
+
+	@Test
+	public void batchCarriesWaveBLists()
+	{
+		BatchPayload batch = new BatchPayload();
+		batch.rsn = "Zezima";
+		batch.pluginVersion = "1.5.0";
+
+		SlayerTaskUpdate task = new SlayerTaskUpdate();
+		task.rsn = "Zezima";
+		task.pluginVersion = "1.5.0";
+		task.creature = "GARGOYLES";
+		task.transition = SlayerTaskUpdate.SlayerTransition.ASSIGNED;
+		batch.slayerTasks = Arrays.asList(task);
+
+		NpcKillCounts counts = new NpcKillCounts();
+		counts.rsn = "Zezima";
+		counts.pluginVersion = "1.5.0";
+		counts.sessionId = "sid-b1";
+		counts.kills = Arrays.asList(new NpcKillCounts.NpcKill("Gargoyle", 1));
+		batch.npcKills = Arrays.asList(counts);
+
+		FarmingState farming = new FarmingState();
+		farming.rsn = "Zezima";
+		farming.pluginVersion = "1.5.0";
+		farming.patch = "Catherby herb";
+		farming.state = FarmingState.FarmingPatchState.PLANTED;
+		batch.farmingState = Arrays.asList(farming);
+
+		JsonObject o = json(batch);
+		assertTrue("batch must use slayer_tasks", o.has("slayer_tasks"));
+		assertTrue("batch must use npc_kills", o.has("npc_kills"));
+		assertTrue("batch must use farming_state", o.has("farming_state"));
+		assertEquals(1, o.getAsJsonArray("slayer_tasks").size());
+		assertEquals(1, o.getAsJsonArray("npc_kills").size());
+		assertEquals(1, o.getAsJsonArray("farming_state").size());
+	}
 }
