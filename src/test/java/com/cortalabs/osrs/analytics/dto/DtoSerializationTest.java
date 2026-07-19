@@ -908,4 +908,51 @@ public class DtoSerializationTest
 		assertEquals(1, o.getAsJsonArray("npc_kills").size());
 		assertEquals(1, o.getAsJsonArray("farming_state").size());
 	}
+
+	// --- Live position (task #17) — a once-per-post envelope field, not a list ---
+
+	@Test
+	public void livePositionUsesContractFields()
+	{
+		LivePosition pos = new LivePosition(12850, 3222, 3218, 1);
+
+		JsonObject o = json(pos);
+		assertEquals(12850, o.get("region_id").getAsInt());
+		assertEquals(3222, o.get("x").getAsInt());
+		assertEquals(3218, o.get("y").getAsInt());
+		assertEquals(1, o.get("plane").getAsInt());
+		// region_id is snake_case on the wire; x/y/plane keep their bare names.
+		assertFalse("must not use a camelCase regionId key", o.has("regionId"));
+	}
+
+	@Test
+	public void batchCarriesPositionAsTopLevelObject()
+	{
+		BatchPayload batch = new BatchPayload();
+		batch.rsn = "Zezima";
+		batch.pluginVersion = "1.6.0";
+		batch.position = new LivePosition(12850, 3222, 3218, 0);
+
+		JsonObject o = json(batch);
+		assertTrue("position is a top-level object on the batch, not a list", o.has("position"));
+		JsonObject pos = o.getAsJsonObject("position");
+		assertEquals(12850, pos.get("region_id").getAsInt());
+		assertEquals(3222, pos.get("x").getAsInt());
+		assertEquals(3218, pos.get("y").getAsInt());
+		assertEquals(0, pos.get("plane").getAsInt());
+	}
+
+	@Test
+	public void batchOmitsNullPosition()
+	{
+		// Witnessed-or-absent: an unset position is null -> omitted entirely (never
+		// null, never a 0,0 tile), matching the additive/backward-compatible contract.
+		BatchPayload batch = new BatchPayload();
+		batch.rsn = "Zezima";
+		batch.pluginVersion = "1.6.0";
+		batch.position = null;
+
+		JsonObject o = json(batch);
+		assertFalse("null position must be absent from the wire", o.has("position"));
+	}
 }

@@ -16,6 +16,7 @@ import com.cortalabs.osrs.analytics.dto.EfficiencyEnvelope;
 import com.cortalabs.osrs.analytics.dto.EquipmentState;
 import com.cortalabs.osrs.analytics.dto.FarmingState;
 import com.cortalabs.osrs.analytics.dto.GeTrade;
+import com.cortalabs.osrs.analytics.dto.LivePosition;
 import com.cortalabs.osrs.analytics.dto.LootDrop;
 import com.cortalabs.osrs.analytics.dto.NpcKillCounts;
 import com.cortalabs.osrs.analytics.dto.PluginPayload;
@@ -42,6 +43,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
@@ -172,6 +174,13 @@ public class AnalyticsClient
 	private Notifier notifier;
 	private ScheduledFuture<?> flushTask;
 
+	/**
+	 * Supplies the current witnessed player position at flush time, or {@code null}
+	 * when there is none fresh. Set once at startup (see {@link #setPositionSupplier});
+	 * read on the scheduler thread in {@link #assemble}. Never touches the client.
+	 */
+	private volatile Supplier<LivePosition> positionSupplier;
+
 	@Inject
 	public AnalyticsClient(OkHttpClient httpClient, ScheduledExecutorService executor)
 	{
@@ -190,6 +199,18 @@ public class AnalyticsClient
 	public void setNotifier(Notifier notifier)
 	{
 		this.notifier = notifier;
+	}
+
+	/**
+	 * Provide the source of the per-post {@code position} block. The supplier is
+	 * polled once per batch on the scheduler thread and must return the current
+	 * witnessed position or {@code null} when there is none — its freshness /
+	 * witnessed-or-absent contract is owned entirely by the supplier
+	 * ({@code LivePositionCollector}); this client just attaches whatever it returns.
+	 */
+	public void setPositionSupplier(Supplier<LivePosition> positionSupplier)
+	{
+		this.positionSupplier = positionSupplier;
 	}
 
 	/**
@@ -454,6 +475,15 @@ public class AnalyticsClient
 		PluginPayload first = group.get(0).getPayload();
 		batch.world = first.world;
 		batch.pluginVersion = first.pluginVersion;
+
+		// Once-per-post envelope field: the current witnessed tile, or absent.
+		// A null supplier (never wired) or a null return (no fresh witnessed
+		// player) leaves batch.position null, which Gson omits — witnessed-or-absent.
+		Supplier<LivePosition> supplier = positionSupplier;
+		if (supplier != null)
+		{
+			batch.position = supplier.get();
+		}
 
 		for (QueuedEvent e : group)
 		{

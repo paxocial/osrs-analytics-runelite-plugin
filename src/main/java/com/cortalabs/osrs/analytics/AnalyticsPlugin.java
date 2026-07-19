@@ -14,6 +14,7 @@ import com.cortalabs.osrs.analytics.collector.EfficiencyCollector;
 import com.cortalabs.osrs.analytics.collector.EquipmentCollector;
 import com.cortalabs.osrs.analytics.collector.FarmingCollector;
 import com.cortalabs.osrs.analytics.collector.GeTradeCollector;
+import com.cortalabs.osrs.analytics.collector.LivePositionCollector;
 import com.cortalabs.osrs.analytics.collector.LootCollector;
 import com.cortalabs.osrs.analytics.collector.NameChangeCollector;
 import com.cortalabs.osrs.analytics.collector.NpcKillCollector;
@@ -133,6 +134,9 @@ public class AnalyticsPlugin extends Plugin
 	private RegionTimeShareCollector regionTimeShareCollector;
 
 	@Inject
+	private LivePositionCollector livePositionCollector;
+
+	@Inject
 	private EfficiencyCollector efficiencyCollector;
 
 	@Inject
@@ -183,6 +187,7 @@ public class AnalyticsPlugin extends Plugin
 			lootCollector,
 			activityCollector,
 			regionTimeShareCollector,
+			livePositionCollector,
 			efficiencyCollector,
 			activityClassificationCollector,
 			signalEventCollector,
@@ -197,6 +202,9 @@ public class AnalyticsPlugin extends Plugin
 
 		reconfigure();
 		analyticsClient.setNotifier(this::notifyPlayer);
+		// The tracker witnesses the tile on the client thread; the client pulls the
+		// current value at flush time (off the client thread) via this supplier.
+		analyticsClient.setPositionSupplier(livePositionCollector::currentPosition);
 		panelStateTracker.reset();
 		for (Object collector : collectors)
 		{

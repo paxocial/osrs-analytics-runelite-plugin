@@ -5,6 +5,7 @@
 package com.cortalabs.osrs.analytics.transport;
 
 import com.cortalabs.osrs.analytics.dto.CollectionLogEntry;
+import com.cortalabs.osrs.analytics.dto.LivePosition;
 import com.cortalabs.osrs.analytics.dto.LootDrop;
 import com.cortalabs.osrs.analytics.dto.SessionEvent;
 import com.cortalabs.osrs.analytics.dto.XpSnapshot;
@@ -119,6 +120,58 @@ public class AnalyticsClientTest
 		assertTrue(body.has("loot"));
 		assertTrue(body.has("sessions"));
 		assertEquals(0, client.queueSize());
+	}
+
+	@Test
+	public void flushBatchCarriesPositionWhenSupplierReturnsOne() throws Exception
+	{
+		server.enqueue(new MockResponse().setResponseCode(200));
+		configure(true);
+		// The witnessing collector supplies the current tile; the client attaches it
+		// once per post as a top-level envelope field, not a category row.
+		client.setPositionSupplier(() -> new LivePosition(12850, 3222, 3218, 0));
+		client.enqueue(EventCategory.XP, xp("Zezima"));
+
+		client.flushOnce();
+
+		JsonObject body = parse(server.takeRequest().getBody().readUtf8());
+		assertTrue("position rides once per post", body.has("position"));
+		JsonObject pos = body.getAsJsonObject("position");
+		assertEquals(12850, pos.get("region_id").getAsInt());
+		assertEquals(3222, pos.get("x").getAsInt());
+		assertEquals(3218, pos.get("y").getAsInt());
+		assertEquals(0, pos.get("plane").getAsInt());
+	}
+
+	@Test
+	public void flushBatchOmitsPositionWhenSupplierReturnsNull() throws Exception
+	{
+		server.enqueue(new MockResponse().setResponseCode(200));
+		configure(true);
+		// No fresh witnessed player -> the supplier returns null -> witnessed-or-absent:
+		// the block is omitted entirely, never a null and never a 0,0 placeholder.
+		client.setPositionSupplier(() -> null);
+		client.enqueue(EventCategory.XP, xp("Zezima"));
+
+		client.flushOnce();
+
+		JsonObject body = parse(server.takeRequest().getBody().readUtf8());
+		assertFalse("no witnessed player -> position omitted", body.has("position"));
+	}
+
+	@Test
+	public void flushBatchOmitsPositionWhenNoSupplierWired() throws Exception
+	{
+		server.enqueue(new MockResponse().setResponseCode(200));
+		configure(true);
+		// No supplier attached at all (the lane never wired): position simply omitted,
+		// so the additive field never appears for a client that doesn't carry it.
+		client.enqueue(EventCategory.XP, xp("Zezima"));
+
+		client.flushOnce();
+
+		JsonObject body = parse(server.takeRequest().getBody().readUtf8());
+		assertFalse("absent supplier -> position omitted", body.has("position"));
 	}
 
 	@Test

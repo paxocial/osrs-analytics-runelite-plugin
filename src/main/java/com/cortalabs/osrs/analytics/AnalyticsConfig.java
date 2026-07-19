@@ -214,6 +214,12 @@ public interface AnalyticsConfig extends Config
 		return true;
 	}
 
+	@ConfigItem(keyName = "trackLivePosition", name = "Live position", description = "Your exact map tile (region, x, y, plane), sent once per batch while you are logged in so the dashboard can show where you are now.", section = categoriesSection, position = 16)
+	default boolean trackLivePosition()
+	{
+		return true;
+	}
+
 	// --- Private data (off by default) ---
 
 	@ConfigItem(

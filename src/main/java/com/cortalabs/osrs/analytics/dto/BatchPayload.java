@@ -15,6 +15,14 @@ import java.util.List;
  */
 public class BatchPayload extends PluginPayload
 {
+	/**
+	 * The local player's exact position at emission time, carried once per post
+	 * (an envelope field, NOT a category list). Left {@code null} — and so omitted
+	 * by Gson — whenever there is no fresh witnessed local player, matching the
+	 * witnessed-or-absent contract on {@link LivePosition}.
+	 */
+	public LivePosition position;
+
 	public List<SessionEvent> sessions;
 
 	@SerializedName("xp_snapshots")
