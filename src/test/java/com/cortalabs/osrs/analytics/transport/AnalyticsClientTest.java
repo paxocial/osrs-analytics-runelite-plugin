@@ -16,6 +16,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
@@ -26,6 +27,7 @@ import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -99,6 +101,10 @@ public class AnalyticsClientTest
 		assertEquals("Zezima", body.get("rsn").getAsString());
 		assertTrue(body.has("xp_snapshots"));
 		assertEquals(1, body.getAsJsonArray("xp_snapshots").size());
+		String eventId = body.getAsJsonArray("xp_snapshots").get(0)
+			.getAsJsonObject().get("event_id").getAsString();
+		assertTrue("live child identity is a UUID on the wire", eventId.matches(
+			"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"));
 		assertEquals(AnalyticsClient.State.OK, client.getState());
 		assertEquals(0, client.queueSize());
 	}
@@ -119,6 +125,15 @@ public class AnalyticsClientTest
 		assertTrue(body.has("xp_snapshots"));
 		assertTrue(body.has("loot"));
 		assertTrue(body.has("sessions"));
+		String xpId = body.getAsJsonArray("xp_snapshots").get(0).getAsJsonObject()
+			.get("event_id").getAsString();
+		String lootId = body.getAsJsonArray("loot").get(0).getAsJsonObject()
+			.get("event_id").getAsString();
+		String sessionId = body.getAsJsonArray("sessions").get(0).getAsJsonObject()
+			.get("event_id").getAsString();
+		assertNotEquals("each live child owns a unique event id", xpId, lootId);
+		assertNotEquals("each live child owns a unique event id", xpId, sessionId);
+		assertNotEquals("each live child owns a unique event id", lootId, sessionId);
 		assertEquals(0, client.queueSize());
 	}
 
@@ -141,6 +156,113 @@ public class AnalyticsClientTest
 		assertEquals(3222, pos.get("x").getAsInt());
 		assertEquals(3218, pos.get("y").getAsInt());
 		assertEquals(0, pos.get("plane").getAsInt());
+		assertTrue("position owns a live child event id", pos.get("event_id").getAsString()
+			.matches("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"));
+		assertNotEquals(
+			"position identity is unique within the batch",
+			body.getAsJsonArray("xp_snapshots").get(0).getAsJsonObject().get("event_id").getAsString(),
+			pos.get("event_id").getAsString());
+	}
+
+	@Test
+	public void quietGameEmitsPositionOnlyHeartbeatOnTheNormalFlushCadence() throws Exception
+	{
+		server.enqueue(new MockResponse().setResponseCode(200));
+		server.enqueue(new MockResponse().setResponseCode(200));
+		configure(true);
+		client.setPositionSupplier(() -> new LivePosition(12850, 3222, 3218, 0));
+		client.enqueue(EventCategory.XP, xp("Zezima"));
+
+		client.flushOnce();
+		JsonObject first = parse(server.takeRequest().getBody().readUtf8());
+		String firstPositionId = first.getAsJsonObject("position").get("event_id").getAsString();
+
+		clock[0] += 15_000L;
+		client.flushOnce();
+
+		RecordedRequest heartbeatRequest = server.takeRequest(1, TimeUnit.SECONDS);
+		assertTrue("quiet game must emit a heartbeat", heartbeatRequest != null);
+		JsonObject heartbeat = parse(heartbeatRequest.getBody().readUtf8());
+		assertEquals("Zezima", heartbeat.get("rsn").getAsString());
+		assertTrue("quiet heartbeat carries only witnessed position", heartbeat.has("position"));
+		assertFalse("quiet heartbeat must not fabricate an XP child", heartbeat.has("xp_snapshots"));
+		String heartbeatId = heartbeat.getAsJsonObject("position").get("event_id").getAsString();
+		assertNotEquals("each accepted presence observation is a new claim", firstPositionId, heartbeatId);
+		assertEquals(0, client.queueSize());
+		assertEquals("presence beats do not inflate gameplay-event counters", 1L,
+			client.snapshot().totalAccepted());
+	}
+
+	@Test
+	public void quietGameDoesNotClaimPresenceWithoutAFreshWitnessedPosition() throws Exception
+	{
+		server.enqueue(new MockResponse().setResponseCode(200));
+		configure(true);
+		client.setPositionSupplier(() -> null);
+		client.enqueue(EventCategory.XP, xp("Zezima"));
+		client.flushOnce();
+		server.takeRequest();
+
+		clock[0] += 15_000L;
+		client.flushOnce();
+
+		assertEquals("no witnessed player means no synthetic online claim", 1,
+			server.getRequestCount());
+	}
+
+	@Test
+	public void quietHeartbeatRespectsRateLimitAndRetriesWithStablePositionId() throws Exception
+	{
+		server.enqueue(new MockResponse().setResponseCode(200));
+		server.enqueue(new MockResponse().setResponseCode(500));
+		server.enqueue(new MockResponse().setResponseCode(200));
+		configure(true);
+		client.setPositionSupplier(() -> new LivePosition(12850, 3222, 3218, 0));
+		client.enqueue(EventCategory.XP, xp("Zezima"));
+		client.flushOnce();
+		server.takeRequest();
+
+		clock[0] += 15_000L;
+		client.flushOnce();
+		RecordedRequest failedRequest = server.takeRequest(1, TimeUnit.SECONDS);
+		assertTrue("quiet heartbeat must reach the server", failedRequest != null);
+		JsonObject failed = parse(failedRequest.getBody().readUtf8());
+		String failedId = failed.getAsJsonObject("position").get("event_id").getAsString();
+		assertEquals("failed heartbeat is retained for retry", 1, client.queueSize());
+
+		client.flushOnce();
+		assertEquals("backoff blocks an immediate retry", 2, server.getRequestCount());
+
+		clock[0] += 10_000L;
+		client.flushOnce();
+		RecordedRequest retriedRequest = server.takeRequest(1, TimeUnit.SECONDS);
+		assertTrue("heartbeat must retry after backoff", retriedRequest != null);
+		JsonObject retried = parse(retriedRequest.getBody().readUtf8());
+		assertEquals("the same position claim is retried", failedId,
+			retried.getAsJsonObject("position").get("event_id").getAsString());
+		assertEquals(0, client.queueSize());
+	}
+
+	@Test
+	public void quietHeartbeatStopsWhenAuthIsRejected() throws Exception
+	{
+		server.enqueue(new MockResponse().setResponseCode(200));
+		server.enqueue(new MockResponse().setResponseCode(401));
+		configure(true);
+		client.setPositionSupplier(() -> new LivePosition(12850, 3222, 3218, 0));
+		client.enqueue(EventCategory.XP, xp("Zezima"));
+		client.flushOnce();
+		assertTrue("quiet heartbeat must reach auth", server.takeRequest(1, TimeUnit.SECONDS) != null);
+
+		clock[0] += 15_000L;
+		client.flushOnce();
+		assertTrue("quiet heartbeat must reach auth", server.takeRequest(1, TimeUnit.SECONDS) != null);
+		assertEquals(AnalyticsClient.State.AUTH_FAILED, client.getState());
+		assertEquals("auth-rejected heartbeat remains queued", 1, client.queueSize());
+
+		clock[0] += 120_000L;
+		client.flushOnce();
+		assertEquals("auth pause blocks all later heartbeat traffic", 2, server.getRequestCount());
 	}
 
 	@Test
@@ -184,12 +306,20 @@ public class AnalyticsClientTest
 		String originalId = client.queuedEventIds().get(0);
 
 		client.flushOnce(); // 500 -> requeue
+		JsonObject failed = parse(server.takeRequest().getBody().readUtf8());
+		String failedWireId = failed.getAsJsonArray("xp_snapshots").get(0)
+			.getAsJsonObject().get("event_id").getAsString();
 		assertEquals(1, client.queueSize());
 		assertEquals("event id must survive retry (idempotency)", originalId, client.queuedEventIds().get(0));
+		assertEquals("queued identity is the serialized identity", originalId, failedWireId);
 		assertEquals(AnalyticsClient.State.ERROR, client.getState());
 
 		clock[0] += 10_000; // clear backoff window
 		client.flushOnce(); // 200 -> success
+		JsonObject retried = parse(server.takeRequest().getBody().readUtf8());
+		assertEquals("retry resends the same child claim", failedWireId,
+			retried.getAsJsonArray("xp_snapshots").get(0).getAsJsonObject()
+				.get("event_id").getAsString());
 
 		assertEquals(2, server.getRequestCount());
 		assertEquals(0, client.queueSize());

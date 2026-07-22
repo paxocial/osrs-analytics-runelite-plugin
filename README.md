@@ -166,7 +166,10 @@ Config group `osrsanalytics`:
 
 Events are queued on the client thread and flushed off-thread as a single
 `POST /api/v1/plugin/batch` request. Sends are spaced to stay under the backend's
-batch rate limit (10/min). Failure handling:
+batch rate limit (10/min). While a player is witnessed in-game, the default 15s
+flush also sends a position-only heartbeat when no gameplay event is queued;
+logout, connection loss, or a stale position stops that heartbeat rather than
+fabricating an online state. Failure handling:
 
 - **429 / 5xx / network** — requeue with exponential backoff (429 honors
   `Retry-After`, both delta-seconds and HTTP-date forms).
@@ -191,9 +194,9 @@ requeue keeps the just-requeued events and drops the newest excess).
 - `ItemManager` lookups (item names / GE prices) run only inside client-thread
   event handlers (loot events, `ItemContainerChanged`), never off-thread.
 - Each queued event carries a client-side `event_id` (UUID) that is stable across
-  retries. It is **not** serialized today (the live contract has no `event_id`
-  field); it exists for client de-duplication and forward compatibility if the
-  backend adopts event-id idempotency.
+  retries and is serialized on every live batch child. Position-only heartbeats
+  use the same retry-stable identity rule, so a resend is the same claim rather
+  than a duplicate observation.
 
 ## License & acknowledgements
 

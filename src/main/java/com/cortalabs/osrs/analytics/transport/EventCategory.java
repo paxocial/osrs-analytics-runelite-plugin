@@ -35,5 +35,9 @@ public enum EventCategory
 	// Wave-B Full Picture lanes (FP-B4), appended after GE_TRADE.
 	SLAYER_TASK,
 	NPC_KILLS,
-	FARMING_STATE
+	FARMING_STATE,
+	// Transport-only top-level position claim. Appended to preserve every existing
+	// status-counter ordinal; accepted position beats are deliberately not counted
+	// as gameplay events by AnalyticsClient.
+	POSITION
 }

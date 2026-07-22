@@ -339,6 +339,24 @@ public class CollectionLogCollectorTest
 	}
 
 	@Test
+	public void prospectorLegsCaptureEmitsTheNamedObtainedItem()
+	{
+		// Prospector legs uses the same real-id named-slot path as every obtained
+		// collection item; pin this concrete account-report signal against accidental
+		// filtering or loss of the resolved display name.
+		CollectionLogEntry payload = new CollectionLogEntry();
+
+		CollectionLogCollector.applyCapture(
+			payload, slot(12020, "Prospector legs"), "Motherlode Mine", Capture.walkInferred());
+
+		assertEquals(12020, payload.itemId);
+		assertEquals("Prospector legs", payload.itemName);
+		assertEquals("Motherlode Mine", payload.source);
+		assertEquals(CollectionLogEntry.PROVENANCE_WALK_INFERRED, payload.captureProvenance);
+		assertNull("a log walk must not invent an acquisition time", payload.obtainedAt);
+	}
+
+	@Test
 	public void emptyWalkConsumesNothing()
 	{
 		Map<String, String> pending = new HashMap<>();

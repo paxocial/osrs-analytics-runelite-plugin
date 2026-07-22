@@ -177,9 +177,15 @@ public class AnalyticsClient
 	/**
 	 * Supplies the current witnessed player position at flush time, or {@code null}
 	 * when there is none fresh. Set once at startup (see {@link #setPositionSupplier});
-	 * read on the scheduler thread in {@link #assemble}. Never touches the client.
+	 * read on the scheduler thread in {@link #positionEvent}. Never touches the client.
 	 */
 	private volatile Supplier<LivePosition> positionSupplier;
+	/**
+	 * Last valid account envelope witnessed by enqueue(). It gives a quiet-game
+	 * position heartbeat the same RSN/world/version authority as the most recent
+	 * real telemetry event without touching the RuneLite client off-thread.
+	 */
+	private volatile PluginPayload heartbeatContext;
 
 	@Inject
 	public AnalyticsClient(OkHttpClient httpClient, ScheduledExecutorService executor)
@@ -282,6 +288,7 @@ public class AnalyticsClient
 		{
 			return;
 		}
+		heartbeatContext = copyContext(payload);
 		QueuedEvent event = new QueuedEvent(category, payload);
 		synchronized (lock)
 		{
@@ -326,14 +333,9 @@ public class AnalyticsClient
 			return;
 		}
 
-		List<QueuedEvent> drained;
+		List<QueuedEvent> drained = new ArrayList<>();
 		synchronized (lock)
 		{
-			if (queue.isEmpty())
-			{
-				return;
-			}
-			drained = new ArrayList<>();
 			while (drained.size() < maxBatchEvents)
 			{
 				QueuedEvent e = queue.pollFirst();
@@ -343,6 +345,15 @@ public class AnalyticsClient
 				}
 				drained.add(e);
 			}
+		}
+		if (drained.isEmpty())
+		{
+			QueuedEvent heartbeat = positionEvent(heartbeatContext);
+			if (heartbeat == null)
+			{
+				return;
+			}
+			drained.add(heartbeat);
 		}
 
 		// A batch may only carry one RSN (the backend resolves the account from
@@ -362,6 +373,16 @@ public class AnalyticsClient
 		{
 			log.debug("Dropping {} telemetry event(s) with no RSN", group.size());
 			return;
+		}
+		if (!hasPosition(group) && group.size() < maxBatchEvents)
+		{
+			QueuedEvent position = positionEvent(group.get(0).getPayload());
+			if (position != null)
+			{
+				// Put the retry-stable position marker first so a bounded retry drain
+				// can never strand it behind a full category batch.
+				group.add(0, position);
+			}
 		}
 
 		sendBatch(rsn, group);
@@ -455,7 +476,10 @@ public class AnalyticsClient
 		{
 			for (QueuedEvent e : group)
 			{
-				acceptedByCategory[e.getCategory().ordinal()]++;
+				if (e.getCategory() != EventCategory.POSITION)
+				{
+					acceptedByCategory[e.getCategory().ordinal()]++;
+				}
 			}
 		}
 		if (recovered)
@@ -475,15 +499,6 @@ public class AnalyticsClient
 		PluginPayload first = group.get(0).getPayload();
 		batch.world = first.world;
 		batch.pluginVersion = first.pluginVersion;
-
-		// Once-per-post envelope field: the current witnessed tile, or absent.
-		// A null supplier (never wired) or a null return (no fresh witnessed
-		// player) leaves batch.position null, which Gson omits — witnessed-or-absent.
-		Supplier<LivePosition> supplier = positionSupplier;
-		if (supplier != null)
-		{
-			batch.position = supplier.get();
-		}
 
 		for (QueuedEvent e : group)
 		{
@@ -547,11 +562,47 @@ public class AnalyticsClient
 				case FARMING_STATE:
 					batch.farmingState = add(batch.farmingState, (FarmingState) p);
 					break;
+				case POSITION:
+					batch.position = e.position();
+					break;
 				default:
 					break;
 			}
 		}
 		return batch;
+	}
+
+	private QueuedEvent positionEvent(PluginPayload context)
+	{
+		Supplier<LivePosition> supplier = positionSupplier;
+		if (context == null || supplier == null)
+		{
+			return null;
+		}
+		LivePosition position = supplier.get();
+		return position == null ? null : QueuedEvent.position(copyContext(context), position);
+	}
+
+	private static boolean hasPosition(List<QueuedEvent> events)
+	{
+		for (QueuedEvent event : events)
+		{
+			if (event.getCategory() == EventCategory.POSITION)
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static PluginPayload copyContext(PluginPayload source)
+	{
+		PluginPayload copy = new PluginPayload();
+		copy.rsn = source.rsn;
+		copy.world = source.world;
+		copy.timestamp = source.timestamp;
+		copy.pluginVersion = source.pluginVersion;
+		return copy;
 	}
 
 	private static <T> List<T> add(List<T> list, T value)

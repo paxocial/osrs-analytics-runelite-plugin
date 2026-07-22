@@ -16,6 +16,10 @@ import com.google.gson.annotations.SerializedName;
  */
 public class PluginPayload
 {
+	/** Stable client-owned idempotency key required by the live batch contract. */
+	@SerializedName("event_id")
+	public String eventId;
+
 	/** RuneScape display name (1-12 chars). */
 	public String rsn;
 

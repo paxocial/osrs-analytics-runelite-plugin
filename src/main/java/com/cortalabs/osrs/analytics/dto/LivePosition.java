@@ -13,7 +13,7 @@ import com.google.gson.annotations.SerializedName;
  * per-category row.
  *
  * <p>Wire shape (pinned contract):
- * <pre>"position": { "region_id": &lt;int&gt;, "x": &lt;int&gt;, "y": &lt;int&gt;, "plane": &lt;int&gt; }</pre>
+ * <pre>"position": { "event_id": &lt;uuid&gt;, "region_id": &lt;int&gt;, "x": &lt;int&gt;, "y": &lt;int&gt;, "plane": &lt;int&gt; }</pre>
  *
  * <p><b>Witnessed-or-absent (I1/I2).</b> The block is present only when a fresh,
  * witnessed local player exists at emission time; otherwise the whole block is
@@ -34,6 +34,10 @@ import com.google.gson.annotations.SerializedName;
  */
 public class LivePosition
 {
+	/** Stable client-owned idempotency key for this witnessed position claim. */
+	@SerializedName("event_id")
+	public String eventId;
+
 	@SerializedName("region_id")
 	public int regionId;
 
