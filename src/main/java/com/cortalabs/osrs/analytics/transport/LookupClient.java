@@ -6,7 +6,6 @@ package com.cortalabs.osrs.analytics.transport;
 
 import com.cortalabs.osrs.analytics.AnalyticsConfig;
 import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.io.IOException;
@@ -79,22 +78,23 @@ public class LookupClient
 	private final ScheduledExecutorService executor;
 	private final Supplier<String> baseUrlSupplier;
 	private final Supplier<String> apiKeySupplier;
-	private final Gson gson = new GsonBuilder().create();
+	private final Gson gson;
 
 	@Inject
-	public LookupClient(OkHttpClient httpClient, ScheduledExecutorService executor, AnalyticsConfig config)
+	public LookupClient(OkHttpClient httpClient, ScheduledExecutorService executor, AnalyticsConfig config, Gson gson)
 	{
-		this(httpClient, executor, config::apiBaseUrl, config::apiKey);
+		this(httpClient, executor, config::apiBaseUrl, config::apiKey, gson);
 	}
 
 	/** Test seam: supply base URL / key directly instead of a RuneLite config. */
 	LookupClient(OkHttpClient httpClient, ScheduledExecutorService executor,
-		Supplier<String> baseUrlSupplier, Supplier<String> apiKeySupplier)
+		Supplier<String> baseUrlSupplier, Supplier<String> apiKeySupplier, Gson gson)
 	{
 		this.httpClient = httpClient;
 		this.executor = executor;
 		this.baseUrlSupplier = baseUrlSupplier;
 		this.apiKeySupplier = apiKeySupplier;
+		this.gson = gson;
 	}
 
 	/** Look up a player asynchronously; the callback fires on the executor thread. */

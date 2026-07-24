@@ -27,7 +27,6 @@ import com.cortalabs.osrs.analytics.dto.SignalEvent;
 import com.cortalabs.osrs.analytics.dto.SlayerTaskUpdate;
 import com.cortalabs.osrs.analytics.dto.XpSnapshot;
 import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.ZonedDateTime;
@@ -188,18 +187,18 @@ public class AnalyticsClient
 	private volatile PluginPayload heartbeatContext;
 
 	@Inject
-	public AnalyticsClient(OkHttpClient httpClient, ScheduledExecutorService executor)
+	public AnalyticsClient(OkHttpClient httpClient, ScheduledExecutorService executor, Gson gson)
 	{
-		this(httpClient, executor, System::currentTimeMillis);
+		this(httpClient, executor, gson, System::currentTimeMillis);
 	}
 
 	/** Test seam: inject a controllable clock. */
-	AnalyticsClient(OkHttpClient httpClient, ScheduledExecutorService executor, LongSupplier clockMs)
+	AnalyticsClient(OkHttpClient httpClient, ScheduledExecutorService executor, Gson gson, LongSupplier clockMs)
 	{
 		this.httpClient = httpClient;
 		this.executor = executor;
 		this.clockMs = clockMs;
-		this.gson = new GsonBuilder().create();
+		this.gson = gson;
 	}
 
 	public void setNotifier(Notifier notifier)
@@ -489,6 +488,57 @@ public class AnalyticsClient
 		notifiedAuth = false;
 		notifiedUnregistered = false;
 		log.debug("Analytics batch accepted ({} event(s))", group.size());
+	}
+
+	/**
+	 * Consent-sync (contract C5): PUT the per-lane grant map derived from the
+	 * user's plugin toggles to {@code /consent}. The server's deny-by-default
+	 * consent table is the record of truth — until this map is synced, the
+	 * backend silently drops EVERY telemetry lane (each drop is audited
+	 * server-side), so the sync runs at startup and on every config change.
+	 * Fire-and-forget on the scheduler thread; a failed sync only means the
+	 * server keeps its previous (possibly deny-all) state.
+	 */
+	public void syncConsent(java.util.Map<String, Boolean> lanes)
+	{
+		if (executor == null || lanes == null || lanes.isEmpty())
+		{
+			return;
+		}
+		java.util.Map<String, Boolean> copy = new java.util.LinkedHashMap<>(lanes);
+		executor.execute(() -> sendConsent(copy));
+	}
+
+	private void sendConsent(java.util.Map<String, Boolean> lanes)
+	{
+		if (baseUrl.isEmpty() || apiKey.isEmpty())
+		{
+			return;
+		}
+		java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+		body.put("lanes", lanes);
+		Request request = new Request.Builder()
+			.url(baseUrl + "/consent")
+			.header("X-API-Key", apiKey)
+			.header("Accept", "application/json")
+			.put(RequestBody.create(JSON, gson.toJson(body)))
+			.build();
+		try (Response response = httpClient.newCall(request).execute())
+		{
+			if (response.code() == 200)
+			{
+				log.debug("Analytics consent sync accepted ({} lanes)", lanes.size());
+			}
+			else
+			{
+				log.warn("Analytics consent sync rejected (HTTP {})", response.code());
+			}
+		}
+		catch (IOException ex)
+		{
+			// Never include the request (would expose the key); message only.
+			log.debug("Analytics consent sync failed: {}", ex.getMessage());
+		}
 	}
 
 	private BatchPayload assemble(String rsn, List<QueuedEvent> group)

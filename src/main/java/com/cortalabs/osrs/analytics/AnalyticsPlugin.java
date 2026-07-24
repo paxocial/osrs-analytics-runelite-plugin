@@ -338,6 +338,44 @@ public class AnalyticsPlugin extends Plugin
 			config.enabled(),
 			MAX_BATCH_EVENTS,
 			MAX_QUEUE_SIZE);
+		// Consent-sync (C5): the server's deny-by-default per-lane consent
+		// table is the record of truth; without this sync every telemetry
+		// lane is silently dropped server-side no matter what the plugin
+		// sends. The map mirrors the backend's PLUGIN_CONFIG_LANE_MAP.
+		analyticsClient.syncConsent(consentLanes(config));
+	}
+
+	/**
+	 * Expand the user's plugin toggles onto the server's consent-lane
+	 * vocabulary (the backend's {@code PLUGIN_CONFIG_LANE_MAP}, inverted).
+	 * The master switch gates every lane: OFF means a deny-all sync — the
+	 * server record must say what the plugin actually does.
+	 */
+	static java.util.Map<String, Boolean> consentLanes(AnalyticsConfig config)
+	{
+		boolean on = config.enabled();
+		java.util.Map<String, Boolean> lanes = new java.util.LinkedHashMap<>();
+		lanes.put("sessions", on && config.trackSessions());
+		lanes.put("xp_snapshots", on && config.trackXp());
+		lanes.put("quests", on && config.trackQuests());
+		lanes.put("diaries", on && config.trackDiaries());
+		lanes.put("combat_achievements", on && config.trackCombatAchievements());
+		lanes.put("equipment", on && config.trackEquipment());
+		lanes.put("loot", on && config.trackLoot());
+		lanes.put("activity", on && config.trackActivity());
+		lanes.put("region_time", on && config.trackRegionTimeShare());
+		lanes.put("efficiency", on && config.trackEfficiency());
+		lanes.put("activity_time", on && config.trackActivityClassification());
+		lanes.put("signal_events", on && config.trackSignalEvents());
+		lanes.put("ge_trades", on && config.trackGeTrades());
+		lanes.put("slayer_tasks", on && config.trackSlayerTasks());
+		lanes.put("npc_kills", on && config.trackNpcKills());
+		lanes.put("farming_state", on && config.trackFarmingState());
+		lanes.put("position", on && config.trackLivePosition());
+		lanes.put("collection_log", on && config.trackCollectionLog());
+		lanes.put("collection_pages", on && config.trackCollectionLog());
+		lanes.put("bank", on && config.trackBank());
+		return lanes;
 	}
 
 	/** Post a single user-facing notice on the client thread. */

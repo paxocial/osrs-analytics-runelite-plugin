@@ -9,6 +9,7 @@ import com.cortalabs.osrs.analytics.dto.LivePosition;
 import com.cortalabs.osrs.analytics.dto.LootDrop;
 import com.cortalabs.osrs.analytics.dto.SessionEvent;
 import com.cortalabs.osrs.analytics.dto.XpSnapshot;
+import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.time.Instant;
@@ -48,7 +49,7 @@ public class AnalyticsClientTest
 		server = new MockWebServer();
 		server.start();
 		LongSupplier clockMs = () -> clock[0];
-		client = new AnalyticsClient(new OkHttpClient(), null, clockMs);
+		client = new AnalyticsClient(new OkHttpClient(), null, new Gson(), clockMs);
 	}
 
 	@After

@@ -4,6 +4,7 @@
  */
 package com.cortalabs.osrs.analytics.transport;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -39,7 +40,7 @@ public class LookupClientTest
 		// The plugin base URL carries the /api/v1/plugin path; the lookup client must
 		// derive the API ROOT from it (the WOM-compat routes live at the root).
 		Supplier<String> baseUrl = () -> server.url("/api/v1/plugin").toString();
-		client = new LookupClient(new OkHttpClient(), null, baseUrl, () -> "test-key");
+		client = new LookupClient(new OkHttpClient(), null, baseUrl, () -> "test-key", new Gson());
 	}
 
 	@After
