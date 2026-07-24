@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.LongSupplier;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
@@ -107,15 +108,36 @@ public class QuestCollector
 	 * sitting beside its dedup set.
 	 */
 	private final Map<String, QuestStatus.State> lastState = new HashMap<>();
+	/**
+	 * Per-account history of the exact {@link Completion} last emitted for each quest,
+	 * keyed by quest id. Read only by the bounded re-observation path so it can replay
+	 * the byte-identical value the server last stored (same state, same provenance, same
+	 * moment) — a re-observation must refresh observed_at without altering the recorded
+	 * completion. Cleared on account change in lockstep with {@link #lastState} and the
+	 * watermark so one account's completions can never be re-observed onto another.
+	 */
+	private final Map<String, Completion> lastEmitted = new HashMap<>();
 	private long lastAccountHash = AccountKeyedDeltaGuard.NO_ACCOUNT;
 	private long lastScanMs;
+
+	private final LongSupplier clockMs;
+	/** Bounded re-observation timer that refreshes observed_at while the lane is idle. */
+	private final ObservationWatermark watermark;
 
 	@Inject
 	public QuestCollector(Client client, AnalyticsClient analytics, AnalyticsConfig config)
 	{
+		this(client, analytics, config, System::currentTimeMillis);
+	}
+
+	/** Test seam: inject a controllable clock so the re-observation cadence is deterministic. */
+	QuestCollector(Client client, AnalyticsClient analytics, AnalyticsConfig config, LongSupplier clockMs)
+	{
 		this.client = client;
 		this.analytics = analytics;
 		this.config = config;
+		this.clockMs = clockMs;
+		this.watermark = new ObservationWatermark(ObservationWatermark.DEFAULT_REOBSERVE_INTERVAL_MS, clockMs);
 	}
 
 	@Subscribe
@@ -134,7 +156,7 @@ public class QuestCollector
 		{
 			return;
 		}
-		long nowMs = System.currentTimeMillis();
+		long nowMs = clockMs.getAsLong();
 		if (nowMs - lastScanMs < SCAN_INTERVAL_MS)
 		{
 			return;
@@ -151,20 +173,67 @@ public class QuestCollector
 		// quest already complete for the new account is never mislabeled as a
 		// witnessed completion off account A's stale state. Runs in lockstep with the
 		// guard's own accountHash-keyed clear.
+		if (accountHash != lastAccountHash)
+		{
+			// The re-observation history and freshness clock belong to exactly one
+			// account too — forget them in lockstep so a completion is never re-observed
+			// onto a new account and the new account starts its freshness clock cleanly.
+			lastEmitted.clear();
+			watermark.reset();
+		}
 		lastAccountHash = clearHistoryIfAccountChanged(accountHash, lastAccountHash, lastState);
 
 		int questPoints = Math.max(0, client.getVarpValue(VarPlayerID.QP));
 		String now = Payloads.isoNow();
+		// Snapshot the re-observation decision once so a due sweep re-observes every
+		// suppressed quest consistently within this scan.
+		boolean reobserveDue = watermark.dueForReobservation();
+		boolean emittedAny = false;
 		for (Quest quest : Quest.values())
 		{
 			QuestStatus.State current = mapState(quest.getState(client));
 			Completion completion = process(delta, lastState, accountHash, quest.getId(), current, now);
 			if (completion == null)
 			{
-				continue; // unchanged since the last accepted emit — suppressed
+				// Unchanged since the last accepted emit — suppressed by the guard. On the
+				// bounded cadence, re-observe it: replay the exact value last emitted so the
+				// server refreshes observed_at with no fabricated change (never re-witnessing
+				// a completion). Skip a quest never emitted this account (nothing to replay).
+				if (!reobserveDue)
+				{
+					continue;
+				}
+				completion = reobserve(lastEmitted, quest.getId());
+				if (completion == null)
+				{
+					continue;
+				}
+			}
+			else
+			{
+				lastEmitted.put(String.valueOf(quest.getId()), completion);
 			}
 			emit(rsn, quest.getId(), quest.getName(), current, questPoints, completion);
+			emittedAny = true;
 		}
+		if (emittedAny)
+		{
+			watermark.markObserved();
+		}
+	}
+
+	/**
+	 * The bounded re-observation lookup: the exact {@link Completion} last emitted for a
+	 * quest this account, or {@code null} when the quest has never been emitted (so there
+	 * is nothing to re-observe). Replaying the stored completion — same provenance, same
+	 * moment — keeps a re-observation byte-identical to what the server last stored, so it
+	 * refreshes observed_at without recording a change and never re-dates a completion.
+	 * Pure and client-free for direct testing; mirrors the "take state as arguments" shape
+	 * of the other helpers.
+	 */
+	static Completion reobserve(Map<String, Completion> lastEmitted, int questId)
+	{
+		return lastEmitted.get(String.valueOf(questId));
 	}
 
 	/**

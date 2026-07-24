@@ -11,6 +11,7 @@ import com.cortalabs.osrs.analytics.transport.EventCategory;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.LongSupplier;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
@@ -58,6 +59,9 @@ public class CombatAchievementCollector
 	private final Client client;
 	private final AnalyticsClient analytics;
 	private final AnalyticsConfig config;
+	private final LongSupplier clockMs;
+	/** Bounded re-observation timer that refreshes observed_at while the lane is idle. */
+	private final ObservationWatermark watermark;
 
 	private String lastSignature;
 	private String lastRsn;
@@ -72,9 +76,17 @@ public class CombatAchievementCollector
 	@Inject
 	public CombatAchievementCollector(Client client, AnalyticsClient analytics, AnalyticsConfig config)
 	{
+		this(client, analytics, config, System::currentTimeMillis);
+	}
+
+	/** Test seam: inject a controllable clock so the re-observation cadence is deterministic. */
+	CombatAchievementCollector(Client client, AnalyticsClient analytics, AnalyticsConfig config, LongSupplier clockMs)
+	{
 		this.client = client;
 		this.analytics = analytics;
 		this.config = config;
+		this.clockMs = clockMs;
+		this.watermark = new ObservationWatermark(ObservationWatermark.DEFAULT_REOBSERVE_INTERVAL_MS, clockMs);
 	}
 
 	@Subscribe
@@ -93,13 +105,15 @@ public class CombatAchievementCollector
 		{
 			return;
 		}
-		// Reset the change-detection baseline when the account changes.
+		// Reset the change-detection baseline AND the freshness watermark when the
+		// account changes, so one account's staleness clock never carries into another.
 		if (!rsn.equals(lastRsn))
 		{
 			lastRsn = rsn;
 			lastSignature = null;
+			watermark.reset();
 		}
-		long nowMs = System.currentTimeMillis();
+		long nowMs = clockMs.getAsLong();
 		if (nowMs - lastScanMs < SCAN_INTERVAL_MS)
 		{
 			return;
@@ -118,7 +132,12 @@ public class CombatAchievementCollector
 			tierProgress.put(entry.getKey(), count);
 			signature.append(entry.getKey()).append('=').append(count).append(';');
 		}
-		if (signature.toString().equals(lastSignature))
+		boolean changed = !signature.toString().equals(lastSignature);
+		// Emit on a real change, or re-observe the unchanged lane on the bounded cadence
+		// so observed_at stays fresh. A re-observation re-sends the identical tier counts
+		// (with a fresh witness timestamp), so the server refreshes observed_at without a
+		// fabricated change row.
+		if (!watermark.shouldEmit(changed))
 		{
 			return;
 		}
@@ -134,5 +153,6 @@ public class CombatAchievementCollector
 		// the field; flagged for schema removal.
 		payload.completedTasks = new ArrayList<>();
 		analytics.enqueue(EventCategory.COMBAT_ACHIEVEMENT, payload);
+		watermark.markObserved();
 	}
 }

@@ -14,6 +14,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.LongSupplier;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
@@ -78,6 +79,9 @@ public class DiaryCollector
 	private final Client client;
 	private final AnalyticsClient analytics;
 	private final AnalyticsConfig config;
+	private final LongSupplier clockMs;
+	/** Bounded re-observation timer that refreshes observed_at while the lane is idle. */
+	private final ObservationWatermark watermark;
 
 	private final Map<String, String> lastSignature = new HashMap<>();
 	private String lastRsn;
@@ -92,9 +96,17 @@ public class DiaryCollector
 	@Inject
 	public DiaryCollector(Client client, AnalyticsClient analytics, AnalyticsConfig config)
 	{
+		this(client, analytics, config, System::currentTimeMillis);
+	}
+
+	/** Test seam: inject a controllable clock so the re-observation cadence is deterministic. */
+	DiaryCollector(Client client, AnalyticsClient analytics, AnalyticsConfig config, LongSupplier clockMs)
+	{
 		this.client = client;
 		this.analytics = analytics;
 		this.config = config;
+		this.clockMs = clockMs;
+		this.watermark = new ObservationWatermark(ObservationWatermark.DEFAULT_REOBSERVE_INTERVAL_MS, clockMs);
 	}
 
 	@Subscribe
@@ -113,14 +125,16 @@ public class DiaryCollector
 		{
 			return;
 		}
-		// Reset the change-detection baseline when the account changes so one
-		// player's completions are never attributed to another.
+		// Reset the change-detection baseline AND the freshness watermark when the
+		// account changes so one player's completions/staleness clock are never
+		// attributed to another.
 		if (!rsn.equals(lastRsn))
 		{
 			lastRsn = rsn;
 			lastSignature.clear();
+			watermark.reset();
 		}
-		long nowMs = System.currentTimeMillis();
+		long nowMs = clockMs.getAsLong();
 		if (nowMs - lastScanMs < SCAN_INTERVAL_MS)
 		{
 			return;
@@ -131,6 +145,10 @@ public class DiaryCollector
 
 	private void scan(String rsn)
 	{
+		// Snapshot the re-observation decision once so a due sweep re-emits every region
+		// consistently within this scan; markObserved() at the end restarts the interval.
+		boolean reobserveDue = watermark.dueForReobservation();
+		boolean emittedAny = false;
 		for (Map.Entry<String, int[]> entry : REGION_TIER_VARBITS.entrySet())
 		{
 			String region = entry.getKey();
@@ -145,7 +163,11 @@ public class DiaryCollector
 			boolean elite = isComplete(varbits[3]);
 
 			String signature = easy + "|" + medium + "|" + hard + "|" + elite;
-			if (signature.equals(lastSignature.get(region)))
+			boolean changed = !signature.equals(lastSignature.get(region));
+			// Emit on a real change, or re-observe the unchanged region on the bounded
+			// cadence. A re-observation re-sends the identical tier flags (with a fresh
+			// witness timestamp), refreshing observed_at without a fabricated change row.
+			if (!changed && !reobserveDue)
 			{
 				continue;
 			}
@@ -159,6 +181,11 @@ public class DiaryCollector
 			payload.hard = hard;
 			payload.elite = elite;
 			analytics.enqueue(EventCategory.DIARY, payload);
+			emittedAny = true;
+		}
+		if (emittedAny)
+		{
+			watermark.markObserved();
 		}
 	}
 

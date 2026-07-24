@@ -7,3 +7,12 @@ build
 nbactions.xml
 nb-configuration.xml
 nbproject/
+# Secret-material guardrails (public repo; SEC-1 recommendation)
+*.env
+.env*
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+runelite-config*.json

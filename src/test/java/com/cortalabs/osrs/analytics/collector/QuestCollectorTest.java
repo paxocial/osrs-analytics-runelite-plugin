@@ -260,4 +260,53 @@ public class QuestCollectorTest
 		assertNotNull("account B's first observation must emit even with an identical state",
 			QuestCollector.process(delta, history, ACCT_B, 42, QuestStatus.State.COMPLETE, NOW));
 	}
+
+	// ------------------------------------------------------------------
+	// Watermark honesty (P1): a bounded re-observation refreshes observed_at by
+	// REPLAYING the byte-identical value last emitted — never re-witnessing a
+	// completion, never fabricating one for a quest never seen.
+	// ------------------------------------------------------------------
+
+	/**
+	 * MUTATION-PROVE (a re-observation never re-dates a completion). {@code reobserve}
+	 * replays the EXACT completion last emitted — a witnessed completion keeps its
+	 * original moment, an inferred one stays moment-less. If re-observation instead
+	 * rebuilt the completion from the current scan it would re-stamp an old completion
+	 * with {@code now}; replaying the stored value is what prevents that.
+	 */
+	@Test
+	public void reobserveReplaysTheExactCompletionLastEmitted()
+	{
+		Map<String, Completion> lastEmitted = new HashMap<>();
+		Completion witnessed = Completion.liveWitnessed(NOW);
+		lastEmitted.put("42", witnessed);
+		lastEmitted.put("7", Completion.walkInferred());
+
+		Completion replayedWitnessed = QuestCollector.reobserve(lastEmitted, 42);
+		assertNotNull(replayedWitnessed);
+		assertEquals("a re-observed witnessed completion keeps its original provenance",
+			QuestStatus.PROVENANCE_LIVE_WITNESSED, replayedWitnessed.provenance);
+		assertEquals("and its original moment — never re-dated to the re-observation time",
+			NOW, replayedWitnessed.completedAt);
+
+		Completion replayedInferred = QuestCollector.reobserve(lastEmitted, 7);
+		assertNotNull(replayedInferred);
+		assertEquals(QuestStatus.PROVENANCE_WALK_INFERRED, replayedInferred.provenance);
+		assertNull("an inferred completion stays moment-less on re-observation", replayedInferred.completedAt);
+	}
+
+	/**
+	 * MUTATION-PROVE (no fabrication). A quest never emitted this account has nothing to
+	 * replay, so {@code reobserve} returns null and the collector skips it — a bounded
+	 * re-observation must never invent a row for a lane it never witnessed. Make
+	 * reobserve fall back to a synthesized completion and this flips.
+	 */
+	@Test
+	public void reobserveReturnsNullForAQuestNeverEmitted()
+	{
+		Map<String, Completion> lastEmitted = new HashMap<>();
+		lastEmitted.put("42", Completion.walkInferred());
+		assertNull("a never-emitted quest has nothing to re-observe",
+			QuestCollector.reobserve(lastEmitted, 999));
+	}
 }

@@ -27,7 +27,6 @@ import com.cortalabs.osrs.analytics.dto.SignalEvent;
 import com.cortalabs.osrs.analytics.dto.SlayerTaskUpdate;
 import com.cortalabs.osrs.analytics.dto.XpSnapshot;
 import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.ZonedDateTime;
@@ -188,18 +187,18 @@ public class AnalyticsClient
 	private volatile PluginPayload heartbeatContext;
 
 	@Inject
-	public AnalyticsClient(OkHttpClient httpClient, ScheduledExecutorService executor)
+	public AnalyticsClient(OkHttpClient httpClient, ScheduledExecutorService executor, Gson gson)
 	{
-		this(httpClient, executor, System::currentTimeMillis);
+		this(httpClient, executor, gson, System::currentTimeMillis);
 	}
 
 	/** Test seam: inject a controllable clock. */
-	AnalyticsClient(OkHttpClient httpClient, ScheduledExecutorService executor, LongSupplier clockMs)
+	AnalyticsClient(OkHttpClient httpClient, ScheduledExecutorService executor, Gson gson, LongSupplier clockMs)
 	{
 		this.httpClient = httpClient;
 		this.executor = executor;
 		this.clockMs = clockMs;
-		this.gson = new GsonBuilder().create();
+		this.gson = gson;
 	}
 
 	public void setNotifier(Notifier notifier)
