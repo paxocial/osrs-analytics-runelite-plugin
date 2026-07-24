@@ -490,6 +490,57 @@ public class AnalyticsClient
 		log.debug("Analytics batch accepted ({} event(s))", group.size());
 	}
 
+	/**
+	 * Consent-sync (contract C5): PUT the per-lane grant map derived from the
+	 * user's plugin toggles to {@code /consent}. The server's deny-by-default
+	 * consent table is the record of truth — until this map is synced, the
+	 * backend silently drops EVERY telemetry lane (each drop is audited
+	 * server-side), so the sync runs at startup and on every config change.
+	 * Fire-and-forget on the scheduler thread; a failed sync only means the
+	 * server keeps its previous (possibly deny-all) state.
+	 */
+	public void syncConsent(java.util.Map<String, Boolean> lanes)
+	{
+		if (executor == null || lanes == null || lanes.isEmpty())
+		{
+			return;
+		}
+		java.util.Map<String, Boolean> copy = new java.util.LinkedHashMap<>(lanes);
+		executor.execute(() -> sendConsent(copy));
+	}
+
+	private void sendConsent(java.util.Map<String, Boolean> lanes)
+	{
+		if (baseUrl.isEmpty() || apiKey.isEmpty())
+		{
+			return;
+		}
+		java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+		body.put("lanes", lanes);
+		Request request = new Request.Builder()
+			.url(baseUrl + "/consent")
+			.header("X-API-Key", apiKey)
+			.header("Accept", "application/json")
+			.put(RequestBody.create(JSON, gson.toJson(body)))
+			.build();
+		try (Response response = httpClient.newCall(request).execute())
+		{
+			if (response.code() == 200)
+			{
+				log.debug("Analytics consent sync accepted ({} lanes)", lanes.size());
+			}
+			else
+			{
+				log.warn("Analytics consent sync rejected (HTTP {})", response.code());
+			}
+		}
+		catch (IOException ex)
+		{
+			// Never include the request (would expose the key); message only.
+			log.debug("Analytics consent sync failed: {}", ex.getMessage());
+		}
+	}
+
 	private BatchPayload assemble(String rsn, List<QueuedEvent> group)
 	{
 		BatchPayload batch = new BatchPayload();

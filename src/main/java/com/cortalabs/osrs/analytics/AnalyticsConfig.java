@@ -250,7 +250,7 @@ public interface AnalyticsConfig extends Config
 	@ConfigItem(
 		keyName = "trackCollectionLog",
 		name = "Collection log",
-		description = "Private data. Sends collection-log entries you unlock, detected from your chat.",
+		description = "Private data. Sends collection-log entries you unlock, detected live from your chat, plus full pages whenever you open the collection log. Live detection needs the game setting 'Collection log - New addition notification' (chat) turned ON.",
 		section = privateSection,
 		position = 0
 	)
