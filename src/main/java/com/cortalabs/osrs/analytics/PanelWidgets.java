@@ -4,6 +4,7 @@
  */
 package com.cortalabs.osrs.analytics;
 
+import com.cortalabs.osrs.analytics.transport.AnalyticsClient.ActionOutcome;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
@@ -133,5 +134,52 @@ final class PanelWidgets
 		label.setForeground(INK_DIM);
 		label.setAlignmentX(Component.LEFT_ALIGNMENT);
 		return label;
+	}
+
+	/**
+	 * A left-aligned status label whose text soft-wraps to the sidebar width, for the
+	 * tab action messages (loading / done / honest error). Pair its text with
+	 * {@link #wrap(String)} so a long sentence flows rather than clipping.
+	 */
+	static JLabel wrappingLabel()
+	{
+		JLabel label = new JLabel();
+		label.setForeground(INK_DIM);
+		label.setAlignmentX(Component.LEFT_ALIGNMENT);
+		return label;
+	}
+
+	/** Wrap plain text so a {@link JLabel} soft-wraps at roughly the sidebar width. */
+	static String wrap(String text)
+	{
+		return "<html><body style='width:185px'>" + escapeHtml(text) + "</body></html>";
+	}
+
+	/** Map an on-demand action failure onto a tone: actionable states warn, faults error. */
+	static Color outcomeTone(ActionOutcome outcome)
+	{
+		if (outcome == null)
+		{
+			return ERROR;
+		}
+		switch (outcome)
+		{
+			case NOT_CONFIGURED:
+			case UNAUTHORIZED:
+			case NOT_FOUND:
+			case RATE_LIMITED:
+				return WARN;
+			case UNAVAILABLE:
+			case NETWORK:
+			default:
+				return ERROR;
+		}
+	}
+
+	private static String escapeHtml(String text)
+	{
+		return text == null
+			? ""
+			: text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
 	}
 }

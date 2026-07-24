@@ -61,6 +61,8 @@ class AnalyticsPanel extends PluginPanel
 	private final LedgerContent ledger;
 	private final MaterialTabGroup tabGroup;
 	private final MaterialTab lookupTab;
+	private final CaptureContent captureContent;
+	private final SnapshotsContent snapshotsContent;
 
 	// Lookup tab widgets.
 	private final IconTextField searchBar = new IconTextField();
@@ -86,12 +88,39 @@ class AnalyticsPanel extends PluginPanel
 			refresh();
 		});
 
+		// On-demand tab actions (C6): capture / report→clipboard / browse. They call
+		// the backend directly through the injected transport and are independent of
+		// the telemetry master switch. Reports copy through one honesty-checked sink.
+		ReportCopier reportCopier = new ReportCopier(client, new SystemClipboardSink());
+		captureContent = new CaptureContent(client, this::currentAccount);
+		ReportContent reportContent = new ReportContent(client, reportCopier);
+		snapshotsContent = new SnapshotsContent(client, reportCopier);
+
 		tabGroup = new MaterialTabGroup(display);
 		MaterialTab ledgerTab = new MaterialTab("Ledger", tabGroup, ledger);
 		lookupTab = new MaterialTab("Lookup", tabGroup, buildLookupTab());
+		MaterialTab captureTab = new MaterialTab("Capture", tabGroup, captureContent);
+		// Prefill the account with the watched RSN each time the tab is opened (never
+		// clobbering typed input); gather it on the EDT from published tracker state.
+		captureTab.setOnSelectEvent(() ->
+		{
+			captureContent.prefillIfEmpty(currentAccount());
+			return true;
+		});
+		MaterialTab reportTab = new MaterialTab("Report", tabGroup, reportContent);
+		MaterialTab snapshotsTab = new MaterialTab("Snapshots", tabGroup, snapshotsContent);
+		// Lazy first load: only hit the backend once the user actually opens the tab.
+		snapshotsTab.setOnSelectEvent(() ->
+		{
+			snapshotsContent.ensureLoaded();
+			return true;
+		});
 		tabGroup.setBorder(new EmptyBorder(0, 0, 8, 0));
 		tabGroup.addTab(ledgerTab);
 		tabGroup.addTab(lookupTab);
+		tabGroup.addTab(captureTab);
+		tabGroup.addTab(reportTab);
+		tabGroup.addTab(snapshotsTab);
 		tabGroup.select(ledgerTab);
 
 		add(tabGroup, BorderLayout.NORTH);
@@ -147,6 +176,16 @@ class AnalyticsPanel extends PluginPanel
 			state.progression,
 			Payloads.PLUGIN_VERSION);
 		ledger.render(model, zone, System.currentTimeMillis());
+	}
+
+	/**
+	 * The RSN currently witnessed by the tracker, or {@code null} when none is known.
+	 * Reads only the tracker's published client-thread state, so it is safe to call on
+	 * the EDT (tab select, panel build) — it never touches the game client.
+	 */
+	private String currentAccount()
+	{
+		return tracker.clientState().rsn;
 	}
 
 	// ------------------------------------------------------------------
