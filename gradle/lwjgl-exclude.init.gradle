@@ -1,0 +1,8 @@
+// Deterministic unit-test classpath: RuneLite's client pulls lwjgl natives that
+// can fail to resolve for the host's arch (env nondeterminism, not plugin code).
+// The plugin's unit tests never touch lwjgl, so drop it from testRuntimeClasspath.
+allprojects {
+    configurations.all {
+        exclude group: 'org.lwjgl'
+    }
+}

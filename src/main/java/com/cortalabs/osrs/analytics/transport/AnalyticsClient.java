@@ -27,6 +27,8 @@ import com.cortalabs.osrs.analytics.dto.SignalEvent;
 import com.cortalabs.osrs.analytics.dto.SlayerTaskUpdate;
 import com.cortalabs.osrs.analytics.dto.XpSnapshot;
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.ZonedDateTime;
@@ -46,6 +48,7 @@ import java.util.function.Supplier;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
+import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -827,5 +830,376 @@ public class AnalyticsClient
 	String describeState()
 	{
 		return state.name().toLowerCase(Locale.ROOT);
+	}
+
+	// ------------------------------------------------------------------
+	// On-demand plugin-tab actions (contract C6)
+	//
+	// The side panel's Capture / Report / Snapshots tabs drive these on user
+	// action. Unlike the telemetry batch loop they are NOT gated on the master
+	// switch (configure()'s `enabled`): capturing a snapshot or copying a report
+	// is a deliberate user request, independent of whether background telemetry
+	// is streaming. They require only a configured base URL + API key.
+	//
+	// Each call has a package-private synchronous seam (driven directly by the
+	// transport tests against MockWebServer) and a public async wrapper that runs
+	// it on the shared executor and delivers the outcome on the executor thread —
+	// the panel marshals that onto the EDT, exactly like LookupClient.
+	// ------------------------------------------------------------------
+
+	/** Why an on-demand action could not complete, so the panel shows an honest reason. */
+	public enum ActionOutcome
+	{
+		/** No base URL / API key configured yet. */
+		NOT_CONFIGURED,
+		/** 401/403 — the API key was rejected. */
+		UNAUTHORIZED,
+		/** 404 — the account or snapshot is unknown or not owned by this key. */
+		NOT_FOUND,
+		/** 429 — the plugin rate limit was hit; try again shortly. */
+		RATE_LIMITED,
+		/** 5xx or an unreadable response — the server could not serve it. */
+		UNAVAILABLE,
+		/** The request never reached the server (IO/network failure). */
+		NETWORK
+	}
+
+	/** Carries the failure kind out of a synchronous action seam. */
+	public static final class ActionException extends Exception
+	{
+		private final ActionOutcome outcome;
+
+		ActionException(ActionOutcome outcome, String message)
+		{
+			super(message);
+			this.outcome = outcome;
+		}
+
+		public ActionOutcome outcome()
+		{
+			return outcome;
+		}
+	}
+
+	/** Result sink for {@link #captureSnapshot}. Invoked on the executor thread. */
+	public interface CaptureCallback
+	{
+		void onCaptured(SnapshotCapture result);
+
+		void onFailure(ActionOutcome outcome, String message);
+	}
+
+	/** Result sink for {@link #listSnapshots}. Invoked on the executor thread. */
+	public interface SnapshotsCallback
+	{
+		void onSnapshots(SnapshotPage page);
+
+		void onFailure(ActionOutcome outcome, String message);
+	}
+
+	/** Result sink for {@link #fetchReport}. Invoked on the executor thread. */
+	public interface ReportCallback
+	{
+		void onReport(String report);
+
+		void onFailure(ActionOutcome outcome, String message);
+	}
+
+	/** Take an on-demand snapshot for {@code player}; the callback fires on the executor thread. */
+	public void captureSnapshot(String player, CaptureCallback callback)
+	{
+		if (executor == null)
+		{
+			return;
+		}
+		executor.execute(() ->
+		{
+			try
+			{
+				callback.onCaptured(postSnapshot(player));
+			}
+			catch (ActionException ex)
+			{
+				callback.onFailure(ex.outcome(), ex.getMessage());
+			}
+			catch (RuntimeException ex)
+			{
+				callback.onFailure(ActionOutcome.UNAVAILABLE, "Snapshot failed");
+			}
+		});
+	}
+
+	/** List one page of the calling key's snapshots; the callback fires on the executor thread. */
+	public void listSnapshots(int limit, int offset, SnapshotsCallback callback)
+	{
+		if (executor == null)
+		{
+			return;
+		}
+		executor.execute(() ->
+		{
+			try
+			{
+				callback.onSnapshots(getSnapshotPage(limit, offset));
+			}
+			catch (ActionException ex)
+			{
+				callback.onFailure(ex.outcome(), ex.getMessage());
+			}
+			catch (RuntimeException ex)
+			{
+				callback.onFailure(ActionOutcome.UNAVAILABLE, "Could not load snapshots");
+			}
+		});
+	}
+
+	/** Fetch a snapshot's rendered report markdown; the callback fires on the executor thread. */
+	public void fetchReport(String snapshotId, ReportCallback callback)
+	{
+		if (executor == null)
+		{
+			return;
+		}
+		executor.execute(() ->
+		{
+			try
+			{
+				callback.onReport(getReport(snapshotId));
+			}
+			catch (ActionException ex)
+			{
+				callback.onFailure(ex.outcome(), ex.getMessage());
+			}
+			catch (RuntimeException ex)
+			{
+				callback.onFailure(ActionOutcome.UNAVAILABLE, "Could not fetch the report");
+			}
+		});
+	}
+
+	// --- Synchronous action seams (package-private for tests) ---
+
+	SnapshotCapture postSnapshot(String player) throws ActionException
+	{
+		if (player == null || player.trim().isEmpty())
+		{
+			throw new ActionException(ActionOutcome.NOT_FOUND, "Enter an account name to snapshot.");
+		}
+		HttpUrl url = pluginBaseUrl().newBuilder().addPathSegment("snapshot").build();
+		JsonObject body = new JsonObject();
+		body.addProperty("player", player.trim());
+		Request request = authorized(new Request.Builder().url(url))
+			.post(RequestBody.create(JSON, gson.toJson(body)))
+			.build();
+		try (Response response = httpClient.newCall(request).execute())
+		{
+			requireSuccess(response.code());
+			return parseCapture(bodyText(response));
+		}
+		catch (IOException ex)
+		{
+			throw network(ex);
+		}
+	}
+
+	SnapshotPage getSnapshotPage(int limit, int offset) throws ActionException
+	{
+		HttpUrl url = pluginBaseUrl().newBuilder()
+			.addPathSegment("snapshots")
+			.addQueryParameter("limit", Integer.toString(Math.max(1, limit)))
+			.addQueryParameter("offset", Integer.toString(Math.max(0, offset)))
+			.build();
+		Request request = authorized(new Request.Builder().url(url)).get().build();
+		try (Response response = httpClient.newCall(request).execute())
+		{
+			requireSuccess(response.code());
+			return parsePage(bodyText(response), limit, offset);
+		}
+		catch (IOException ex)
+		{
+			throw network(ex);
+		}
+	}
+
+	String getReport(String snapshotId) throws ActionException
+	{
+		if (snapshotId == null || snapshotId.trim().isEmpty())
+		{
+			throw new ActionException(ActionOutcome.NOT_FOUND, "No snapshot selected.");
+		}
+		HttpUrl url = pluginBaseUrl().newBuilder()
+			.addPathSegment("snapshots")
+			.addPathSegment(snapshotId.trim())
+			.addPathSegment("report")
+			.build();
+		Request request = authorized(new Request.Builder().url(url)).get().build();
+		try (Response response = httpClient.newCall(request).execute())
+		{
+			requireSuccess(response.code());
+			return parseReport(bodyText(response));
+		}
+		catch (IOException ex)
+		{
+			throw network(ex);
+		}
+	}
+
+	// --- Action helpers ---
+
+	/** The configured plugin base URL, or an honest NOT_CONFIGURED failure. */
+	private HttpUrl pluginBaseUrl() throws ActionException
+	{
+		if (baseUrl.isEmpty() || apiKey.isEmpty())
+		{
+			throw new ActionException(ActionOutcome.NOT_CONFIGURED,
+				"Set the backend URL and API key in the plugin config.");
+		}
+		HttpUrl parsed = HttpUrl.parse(baseUrl);
+		if (parsed == null)
+		{
+			throw new ActionException(ActionOutcome.NOT_CONFIGURED, "The backend URL is not valid.");
+		}
+		return parsed;
+	}
+
+	private Request.Builder authorized(Request.Builder builder)
+	{
+		return builder.header("X-API-Key", apiKey).header("Accept", "application/json");
+	}
+
+	private static String bodyText(Response response) throws IOException
+	{
+		return response.body() == null ? "" : response.body().string();
+	}
+
+	private static ActionException network(IOException ex)
+	{
+		return new ActionException(ActionOutcome.NETWORK, "Network error: " + ex.getMessage());
+	}
+
+	/** Map a non-2xx status onto an honest {@link ActionOutcome}; a 2xx just returns. */
+	private static void requireSuccess(int code) throws ActionException
+	{
+		if (code >= 200 && code < 300)
+		{
+			return;
+		}
+		switch (code)
+		{
+			case 401:
+			case 403:
+				throw new ActionException(ActionOutcome.UNAUTHORIZED,
+					"The API key was rejected. Check it in the plugin config.");
+			case 404:
+				throw new ActionException(ActionOutcome.NOT_FOUND,
+					"Not found — this account or snapshot isn't one this key owns.");
+			case 429:
+				throw new ActionException(ActionOutcome.RATE_LIMITED,
+					"Rate limited. Wait a moment and try again.");
+			default:
+				throw new ActionException(ActionOutcome.UNAVAILABLE,
+					"The server couldn't complete that (HTTP " + code + ").");
+		}
+	}
+
+	private SnapshotCapture parseCapture(String json) throws ActionException
+	{
+		JsonObject root = asObject(json);
+		String id = optString(root, "snapshot_db_id", null);
+		if (id == null)
+		{
+			throw new ActionException(ActionOutcome.UNAVAILABLE, "The snapshot response was incomplete.");
+		}
+		return new SnapshotCapture(id, optBool(root, "already_ingested"));
+	}
+
+	private SnapshotPage parsePage(String json, int limit, int offset) throws ActionException
+	{
+		JsonObject root = asObject(json);
+		List<SnapshotSummary> rows = new ArrayList<>();
+		if (root.has("snapshots") && root.get("snapshots").isJsonArray())
+		{
+			for (JsonElement element : root.getAsJsonArray("snapshots"))
+			{
+				if (element != null && element.isJsonObject())
+				{
+					rows.add(parseSummary(element.getAsJsonObject()));
+				}
+			}
+		}
+		int total = optInt(root, "total", rows.size());
+		int resolvedLimit = optInt(root, "limit", limit);
+		int resolvedOffset = optInt(root, "offset", offset);
+		return new SnapshotPage(rows, total, resolvedLimit, resolvedOffset);
+	}
+
+	private static SnapshotSummary parseSummary(JsonObject row)
+	{
+		return new SnapshotSummary(
+			optString(row, "snapshot_id", ""),
+			optString(row, "account_id", ""),
+			optString(row, "account_name", ""),
+			optString(row, "resolved_mode", null),
+			optString(row, "fetched_at", null),
+			optInteger(row, "total_level"),
+			optLongOrNull(row, "total_xp"));
+	}
+
+	private String parseReport(String json) throws ActionException
+	{
+		JsonObject root = asObject(json);
+		String report = optString(root, "report", null);
+		if (report == null)
+		{
+			throw new ActionException(ActionOutcome.UNAVAILABLE, "The server returned no report text.");
+		}
+		return report;
+	}
+
+	private JsonObject asObject(String json) throws ActionException
+	{
+		try
+		{
+			JsonElement parsed = gson.fromJson(json, JsonElement.class);
+			if (parsed != null && parsed.isJsonObject())
+			{
+				return parsed.getAsJsonObject();
+			}
+		}
+		catch (RuntimeException ignored)
+		{
+			// Fall through to the honest failure below.
+		}
+		throw new ActionException(ActionOutcome.UNAVAILABLE, "The server response was not readable.");
+	}
+
+	private static String optString(JsonObject obj, String key, String fallback)
+	{
+		return has(obj, key) ? obj.get(key).getAsString() : fallback;
+	}
+
+	private static boolean optBool(JsonObject obj, String key)
+	{
+		return has(obj, key) && obj.get(key).getAsBoolean();
+	}
+
+	private static int optInt(JsonObject obj, String key, int fallback)
+	{
+		return has(obj, key) ? obj.get(key).getAsInt() : fallback;
+	}
+
+	private static Integer optInteger(JsonObject obj, String key)
+	{
+		return has(obj, key) ? obj.get(key).getAsInt() : null;
+	}
+
+	private static Long optLongOrNull(JsonObject obj, String key)
+	{
+		return has(obj, key) ? obj.get(key).getAsLong() : null;
+	}
+
+	private static boolean has(JsonObject obj, String key)
+	{
+		return obj != null && obj.has(key) && !obj.get(key).isJsonNull();
 	}
 }
